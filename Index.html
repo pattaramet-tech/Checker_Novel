@@ -1,0 +1,1608 @@
+/* =========================
+ * Index.html
+ * ========================= */
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg:#f3f6fb;
+      --card:#ffffff;
+      --line:#e5e7eb;
+      --text:#0f172a;
+      --muted:#64748b;
+      --pri:#2563eb;
+      --warn:#d97706;
+      --good:#059669;
+      --danger:#dc2626;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Arial,sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { max-width:1500px; margin:0 auto; padding:16px; }
+    .toolbar, .actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .toolbar { margin-bottom:12px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px; box-shadow:0 8px 24px rgba(15,23,42,.05); }
+    .stats { display:grid; grid-template-columns:repeat(4,minmax(120px,1fr)); gap:10px; margin-bottom:12px; }
+    .stat .n { font-size:28px; font-weight:700; margin-top:4px; }
+    .grid { display:grid; grid-template-columns:1.6fr 1fr; gap:12px; }
+    input[type=text], select, textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+    button { border:0; border-radius:12px; padding:10px 12px; background:var(--pri); color:#fff; cursor:pointer; }
+    button.secondary { background:#64748b; }
+    button.warn { background:var(--warn); }
+    button.good { background:var(--good); }
+    button.danger { background:var(--danger); }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .table-wrap { max-height:78vh; overflow:auto; border:1px solid var(--line); border-radius:14px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { position:sticky; top:0; background:#f8fafc; z-index:1; text-align:left; }
+    tr:hover { background:#f8fafc; }
+    .muted { color:var(--muted); font-size:12px; }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+    .pending { background:#fee2e2; color:#991b1b; }
+    .checked { background:#fef3c7; color:#92400e; }
+    .posted { background:#dcfce7; color:#166534; }
+    .problem { background:#ede9fe; color:#5b21b6; }
+    .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+    .tab-summary { display:inline-block; padding:6px 10px; border-radius:999px; background:#eef2ff; color:#1d4ed8; font-size:12px; font-weight:700; }
+    .loading { position:fixed; right:16px; bottom:16px; background:#111827; color:#fff; padding:10px 12px; border-radius:12px; display:none; z-index:9999; }
+    label.inline { display:inline-flex; align-items:center; gap:6px; margin-right:12px; }
+    .detail-box { display:grid; gap:10px; }
+    .pre { white-space:pre-wrap; font-family:Consolas,monospace; font-size:12px; background:#0f172a; color:#dbeafe; border-radius:12px; padding:12px; max-height:260px; overflow:auto; }
+    a.inline-link { color:inherit; text-decoration:none; }
+    @media (max-width:1024px) { .grid, .stats { grid-template-columns:1fr; } }
+      input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    transform: scale(1.15);
+    cursor: pointer;
+    vertical-align: middle;
+  }
+
+  .rowSel {
+    width: 22px;
+    height: 22px;
+    transform: scale(1.2);
+  }
+
+  label.inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 14px;
+    font-size: 14px;
+  }
+
+  .select-tools {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    margin:0 0 10px 0;
+    padding:8px 10px;
+    border:1px solid var(--line);
+    border-radius:12px;
+    background:#f8fafc;
+  }
+  .select-tools button {
+    padding:7px 10px;
+    border-radius:10px;
+    font-size:13px;
+  }
+  .select-count {
+    font-size:13px;
+    color:var(--muted);
+    font-weight:700;
+  }
+  .select-number {
+    width:105px;
+    padding:7px 9px;
+    border:1px solid var(--line);
+    border-radius:10px;
+    background:#fff;
+    font-size:13px;
+  }
+  .select-hint {
+    flex-basis:100%;
+    font-size:12px;
+    color:var(--muted);
+  }
+  .pagination {
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    gap:8px;
+    margin-top:10px;
+  }
+  .batch-monitor { margin-bottom:12px; }
+  .batch-progress-track { height:10px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin:8px 0; }
+  .batch-progress-bar { height:100%; width:0; background:var(--pri); transition:width .2s ease; }
+  .failure-table { width:100%; font-size:12px; margin-top:8px; }
+  .failure-table th, .failure-table td { padding:6px 8px; }
+  #checkAllRows {
+    width:22px;
+    height:22px;
+    transform:scale(1.2);
+    cursor:pointer;
+  }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="toolbar">
+    <div style="flex:1 1 340px">
+      <input id="q" type="text" placeholder="ค้นหาชื่อเรื่อง / แถว / หมายเหตุ">
+    </div>
+    <div style="width:220px">
+      <select id="mode">
+        <option value="pending" selected>รอตรวจ</option>
+        <option value="all">ทั้งหมด</option>
+        <option value="waitingWordCheck">กดตรวจแล้ว ยังไม่เช็คคำ</option>
+        <option value="problem">มีปัญหา</option>
+      </select>
+    </div>
+    <button type="button" onclick="loadData()">รีเฟรช</button>
+    <button type="button" class="warn" data-batch-action onclick="scanSelected()">ตรวจแถวที่เลือก</button>
+    <button type="button" class="secondary" data-batch-action onclick="mergeSelected()">รวมชื่อบทที่เลือก</button>
+    <button type="button" class="secondary" data-batch-action onclick="watermarkSelected(true)">ใส่ลายน้ำที่เลือก</button>
+    <button type="button" class="secondary" data-batch-action onclick="watermarkSelected(false)">ลบลายน้ำที่เลือก</button>
+    <button type="button" class="secondary" data-batch-action onclick="checkEmptyTabsSelected()">ตรวจแท็บว่างที่เลือก</button>
+    <button type="button" class="secondary" data-batch-action onclick="checkTailJunkSelected()">ตรวจขยะท้ายบทที่เลือก</button>
+    <button type="button" class="secondary" onclick="resumeSavedScan()">ทำงานตรวจต่อ</button>
+    <button type="button" class="danger" onclick="requestStopScan()">หยุดหลังจบชุดนี้</button>
+    <button type="button" class="secondary" onclick="retryLastFailedTabs()">Retry แท็บที่ล้ม</button>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="card batch-monitor">
+    <strong>สถานะ Batch</strong>
+    <div id="batchProgressText" class="muted">ยังไม่มีงานกำลังทำ</div>
+    <div class="batch-progress-track"><div id="batchProgressBar" class="batch-progress-bar"></div></div>
+    <div id="batchProgressCounts" class="muted"></div>
+    <table class="failure-table">
+      <thead><tr><th>แถวล่าสุด</th><th>เอกสาร/แท็บ</th><th>สาเหตุ</th><th>ทำงาน</th></tr></thead>
+      <tbody id="failureQueueBody"><tr><td colspan="4" class="muted">ไม่มีแท็บที่รอ Retry</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+
+      <div class="select-tools">
+        <label class="inline" style="margin-right:4px">
+          <input id="checkAllRows" type="checkbox" onchange="toggleCheckAllRows(this.checked)">
+          เลือกทั้งหมดในหน้านี้
+        </label>
+        <button type="button" class="secondary" onclick="selectAllVisibleRows()">เลือกทั้งหมด</button>
+        <button type="button" class="secondary" onclick="selectNextRows(10)">เลือกเพิ่ม 10 แถว</button>
+        <input id="selectStartRow" class="select-number" type="number" min="1" step="1" placeholder="แถวเริ่ม เช่น 7">
+        <input id="selectExtraRows" class="select-number" type="number" min="0" step="1" value="3" title="จำนวนแถวถัดไปที่ต้องการเพิ่ม">
+        <button type="button" onclick="selectSpecifiedRowRange()">เลือกช่วงตามแถว</button>
+        <button type="button" class="secondary" onclick="extendSelectionFromLastRow()">เพิ่มต่อจากที่เลือก</button>
+        <button type="button" class="secondary" onclick="clearAllSelections()">ยกเลิกทั้งหมด</button>
+        <span id="selectCount" class="select-count">เลือกแล้ว 0 แถว</span>
+        <span id="selectRangeHint" class="select-hint">ระบุแถวเริ่มและจำนวนแถวเพิ่ม เช่น 7 + 3 จะเลือกแถว 7–10</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:48px">เลือก</th>
+              <th style="width:64px">แถว</th>
+              <th>รายการ</th>
+              <th style="width:150px">สถานะ</th>
+              <th style="width:280px">หมายเหตุ</th>
+              <th style="width:320px">ทำงาน</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="pagination">
+        <button id="prevPage" type="button" class="secondary" onclick="changeDashboardPage(-1)">หน้าก่อน</button>
+        <span id="pageInfo" class="select-count">หน้า 1</span>
+        <button id="nextPage" type="button" class="secondary" onclick="changeDashboardPage(1)">หน้าถัดไป</button>
+        <span id="loadMetrics" class="muted"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div id="detailEmpty" class="muted">เลือกแถวจากตารางก่อน</div>
+      <div id="detailBox" class="detail-box" style="display:none">
+        <div>
+          <div id="dTitle" style="font-weight:700;font-size:18px"></div>
+          <div id="dMeta" class="muted"></div>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="openDoc" onclick="openCurrentDocument_()">เปิด Docs</button>
+          <button type="button" class="warn" onclick="scanCurrent()">ตรวจเอกสารนี้</button>
+          <button type="button" class="secondary" onclick="scanWholeCurrent()">ตรวจทุกแท็บ</button>
+          <button type="button" class="secondary" onclick="formatCurrent()">จัดฟอร์แมตเอกสารนี้</button>
+          <button type="button" class="secondary" onclick="mergeCurrent()">รวมชื่อบทกลับ</button>
+          <button type="button" class="secondary" onclick="clearCurrent()">ล้างไฮไลต์</button>
+          <button type="button" class="secondary" onclick="watermarkCurrent(true)">ใส่ลายน้ำ</button>
+          <button type="button" class="secondary" onclick="watermarkCurrent(false)">ลบลายน้ำ</button>
+        </div>
+
+        <div id="tabs" class="tabs"></div>
+
+        <div>
+          <label class="inline"><input id="f_checked" type="checkbox"> กดตรวจแล้ว</label>
+          <label class="inline"><input id="f_knownWords" type="checkbox"> เช็คคำแล้ว</label>
+          <label class="inline"><input id="f_posted" type="checkbox"> ลงแล้ว</label>
+          <label class="inline"><input id="f_noThai" type="checkbox"> ไม่มีใน Thai</label>
+          <label class="inline"><input id="f_draftGroup" type="checkbox"> สร้างกลุ่มแล้ว</label>
+        </div>
+
+        <textarea id="f_note" rows="5" placeholder="หมายเหตุ"></textarea>
+
+        <div class="actions">
+          <button type="button" class="good" onclick="saveCurrent()">บันทึกสถานะ</button>
+        </div>
+
+        <div id="detailLog" class="pre"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="loading" class="loading">กำลังทำงาน...</div>
+
+<script>
+let state = {
+  rows: [],
+  current: null,
+  page: 1,
+  pageSize: 200,
+  filteredTotal: 0,
+  selectedRows: new Set(),
+  rowSnapshots: new Map(),
+  failureQueueRenderJobs: [],
+  stats: { total: 0, pending: 0, waitingWordCheck: 0, problem: 0 },
+  foregroundLoadGeneration: 0,
+  foregroundLoadRunning: false,
+  backgroundLoadGeneration: 0,
+  actionRunning: false,
+  stopRequested: false,
+  dataRevision: '',
+  revisionCheckRunning: false
+};
+
+function setLoading(show, text) {
+  const el = document.getElementById('loading');
+  el.style.display = show ? 'block' : 'none';
+  el.textContent = text || 'กำลังทำงาน...';
+}
+
+function normalizeServerError(err) {
+  if (!err) return 'Unknown error';
+  if (typeof err === 'string') return err;
+  if (err.message) return err.message;
+  if (err.stack) return err.stack;
+  try { return JSON.stringify(err); } catch (e) {}
+  return String(err);
+}
+
+const serverCallMap = {
+  getDashboardData(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).getDashboardData(arg);
+  },
+  getCheckerDataRevision(_arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).getCheckerDataRevision();
+  },
+  getRowDetail(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).getRowDetail(arg);
+  },
+  updateCheckerFields(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).updateCheckerFields(arg);
+  },
+  resetTabNamesRow(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).resetTabNamesRow(arg);
+  },
+  scanSingleTabRow(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).scanSingleTabRow(arg);
+  },
+  scanWholeDocumentChunk(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).scanWholeDocumentChunk(arg);
+  },
+  retryFailedDocumentTabs(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).retryFailedDocumentTabs(arg);
+  },
+  resolveCheckerRowIdentity(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).resolveCheckerRowIdentity(arg);
+  },
+  scanRowDocumentFull(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).scanRowDocumentFull(arg);
+  },
+  formatRowDocumentFull(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).formatRowDocumentFull(arg);
+  },
+  clearHighlightsRow(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).clearHighlightsRow(arg);
+  },
+  mergeChapterBackRow(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).mergeChapterBackRow(arg);
+  },
+  watermarkRow(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).watermarkRow(arg);
+  },
+  checkRowEmptyTabs(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).checkRowEmptyTabs(arg);
+  },
+  checkRowTailJunk(arg, onSuccess, onFailure) {
+    google.script.run.withSuccessHandler(onSuccess).withFailureHandler(onFailure).checkRowTailJunk(arg);
+  },
+};
+
+function callServer(fn, arg, loadingText) {
+  if (loadingText) setLoading(true, loadingText);
+  return new Promise((resolve, reject) => {
+    const call = serverCallMap[fn];
+    if (!call) {
+      if (loadingText) setLoading(false);
+      reject(new Error('ไม่พบฟังก์ชันฝั่งเซิร์ฟเวอร์: ' + fn));
+      return;
+    }
+
+    call(
+      arg,
+      function(res) {
+        if (loadingText) setLoading(false);
+        resolve(res);
+      },
+      function(err) {
+        if (loadingText) setLoading(false);
+        reject(new Error(normalizeServerError(err)));
+      }
+    );
+  });
+}
+
+function validateDashboardResponse_(res) {
+  if (!res || res.error || !Array.isArray(res.rows)) {
+    throw new Error(res && res.error ? String(res.error) : 'Dashboard response ไม่ถูกต้อง');
+  }
+  return res;
+}
+
+function commitDashboardResponse_(res, requestedPage, fallbackRevision) {
+  const nextRows = res.rows || [];
+  const nextPage = Number(res.page || requestedPage);
+  const nextPageSize = Number(res.pageSize || state.pageSize);
+  const nextFilteredTotal = Number(res.total || 0);
+  const nextStats = Object.assign(
+    { total: 0, pending: 0, waitingWordCheck: 0, problem: 0 },
+    res.stats || {}
+  );
+
+  state.rows = nextRows;
+  state.page = nextPage;
+  state.pageSize = nextPageSize;
+  state.filteredTotal = nextFilteredTotal;
+  state.stats = nextStats;
+  nextRows.forEach(function(row) {
+    state.rowSnapshots.set(Number(row.sheetRow), Object.assign({}, row));
+  });
+  renderStats(state.stats);
+  renderTable(state.rows, res.debug);
+  renderPagination();
+  renderLoadMetrics(res.debug);
+
+  if (res.revisionAvailable === true && res.revision != null) {
+    state.dataRevision = String(res.revision);
+  } else if (fallbackRevision) {
+    state.dataRevision = String(fallbackRevision);
+  }
+}
+
+async function loadData(page, options) {
+  options = options || {};
+  const background = options.background === true;
+  const foregroundGenerationAtStart = background
+    ? Number(options.foregroundGeneration == null
+      ? state.foregroundLoadGeneration
+      : options.foregroundGeneration)
+    : 0;
+  if (background && (
+    state.foregroundLoadRunning ||
+    foregroundGenerationAtStart !== state.foregroundLoadGeneration
+  )) return false;
+
+  const requestId = background
+    ? ++state.backgroundLoadGeneration
+    : ++state.foregroundLoadGeneration;
+  if (!background) state.foregroundLoadRunning = true;
+
+  function responseIsStale_() {
+    if (background) {
+      return requestId !== state.backgroundLoadGeneration ||
+        foregroundGenerationAtStart !== state.foregroundLoadGeneration;
+    }
+    return requestId !== state.foregroundLoadGeneration;
+  }
+
+  try {
+    const requestedPage = Math.max(1, Number(page || 1));
+    const res = await callServer('getDashboardData', {
+      q: document.getElementById('q').value,
+      mode: document.getElementById('mode').value,
+      page: requestedPage,
+      pageSize: state.pageSize
+    }, background ? null : 'กำลังโหลดรายการ...');
+
+    validateDashboardResponse_(res);
+    if (responseIsStale_()) return false;
+    commitDashboardResponse_(res, requestedPage, options.fallbackRevision || '');
+    return true;
+  } catch (err) {
+    if (responseIsStale_()) return false;
+    if (background) {
+      console.warn('Checker background refresh unavailable');
+      return false;
+    }
+    const msg = normalizeServerError(err);
+    renderStats({ total: 0, pending: 0, waitingWordCheck: 0, problem: 0 });
+    document.getElementById('tbody').innerHTML =
+      '<tr><td colspan="6" style="color:#dc2626;white-space:pre-wrap;font-weight:700">' +
+      'โหลดข้อมูลไม่สำเร็จ\n' + escapeHtml(msg) +
+      '</td></tr>';
+    console.error(err);
+    alert('โหลดข้อมูลไม่สำเร็จ\n\n' + msg);
+    return false;
+  } finally {
+    if (!background && requestId === state.foregroundLoadGeneration) {
+      state.foregroundLoadRunning = false;
+    }
+  }
+}
+
+async function checkForExternalCheckerUpdates_() {
+  if (
+    document.visibilityState !== 'visible' ||
+    state.actionRunning ||
+    state.foregroundLoadRunning ||
+    state.revisionCheckRunning
+  ) return;
+
+  const foregroundGenerationAtCheck = state.foregroundLoadGeneration;
+  state.revisionCheckRunning = true;
+  try {
+    const revisionResult = await callServer('getCheckerDataRevision', null);
+    if (
+      state.foregroundLoadRunning ||
+      foregroundGenerationAtCheck !== state.foregroundLoadGeneration
+    ) return;
+    if (!revisionResult || revisionResult.revisionAvailable !== true || revisionResult.revision == null) return;
+    const revision = String(revisionResult.revision || '');
+    if (!revision || revision === state.dataRevision) return;
+    await loadData(state.page, {
+      background: true,
+      fallbackRevision: revision,
+      foregroundGeneration: foregroundGenerationAtCheck
+    });
+  } catch (err) {
+    // การตรวจ revision เป็น best-effort และไม่เปิดเผย raw server error
+    console.warn('Checker revision check unavailable');
+  } finally {
+    state.revisionCheckRunning = false;
+  }
+}
+
+function renderLoadMetrics(debug) {
+  const el = document.getElementById('loadMetrics');
+  if (!el) return;
+  debug = debug || {};
+  const elapsed = Number(debug.elapsedMs || 0);
+  const richRows = Number(debug.richTextRowsRead || 0);
+  el.textContent = elapsed
+    ? ('โหลด ' + state.rows.length + ' แถวใน ' + (elapsed / 1000).toFixed(2) +
+       ' วินาที • Rich Text ' + richRows + ' แถว')
+    : '';
+}
+
+function renderPagination() {
+  const totalPages = Math.max(1, Math.ceil(state.filteredTotal / state.pageSize));
+  const pageInfo = document.getElementById('pageInfo');
+  const prev = document.getElementById('prevPage');
+  const next = document.getElementById('nextPage');
+
+  if (pageInfo) {
+    pageInfo.textContent = 'หน้า ' + state.page + '/' + totalPages +
+      ' • พบ ' + state.filteredTotal + ' แถว';
+  }
+  if (prev) prev.disabled = state.page <= 1;
+  if (next) next.disabled = state.page >= totalPages;
+}
+
+function rowMatchesCurrentDashboardFilter_(row) {
+  if (!row) return false;
+  const mode = document.getElementById('mode').value;
+  const q = String(document.getElementById('q').value || '').trim().toLowerCase();
+
+  if (mode === 'pending' && row.checked) return false;
+  if (mode === 'waitingWordCheck' && (!row.checked || row.knownWords)) return false;
+  if (mode === 'problem' && row.statusText !== 'มีปัญหา') return false;
+
+  if (q) {
+    const searchable = [
+      row.title,
+      row.note,
+      row.indexText,
+      row.sourceUrl2
+    ].map(function(value) {
+      return String(value || '').toLowerCase();
+    });
+    if (!searchable.some(function(value) { return value.indexOf(q) !== -1; })) return false;
+  }
+  return true;
+}
+
+function getRowStatsFlags_(row) {
+  row = row || {};
+  return {
+    pending: !row.checked ? 1 : 0,
+    waitingWordCheck: row.checked && !row.knownWords ? 1 : 0,
+    problem: row.statusText === 'มีปัญหา' ? 1 : 0
+  };
+}
+
+function adjustDashboardStatsForRow_(before, after) {
+  if (!after) return;
+  const oldFlags = before ? getRowStatsFlags_(before) : null;
+  const newFlags = getRowStatsFlags_(after);
+
+  if (!oldFlags) {
+    // ไม่เพิ่ม total เพราะ row นี้มีอยู่ในชีตเดิม เพียงแต่ snapshot ยังไม่เคยถูกโหลด
+    return;
+  }
+
+  ['pending', 'waitingWordCheck', 'problem'].forEach(function(key) {
+    state.stats[key] = Math.max(
+      0,
+      Number(state.stats[key] || 0) + newFlags[key] - oldFlags[key]
+    );
+  });
+}
+
+function patchDashboardRow_(row, deferRender) {
+  if (!row || !row.sheetRow) return;
+  const rowNo = Number(row.sheetRow);
+  const previousSnapshot = state.rowSnapshots.get(rowNo) || null;
+  const index = state.rows.findIndex(function(item) {
+    return Number(item.sheetRow) === rowNo;
+  });
+  const wasVisible = previousSnapshot
+    ? rowMatchesCurrentDashboardFilter_(previousSnapshot)
+    : index >= 0;
+  const stillVisible = rowMatchesCurrentDashboardFilter_(row);
+
+  adjustDashboardStatsForRow_(previousSnapshot, row);
+  state.rowSnapshots.set(rowNo, Object.assign({}, previousSnapshot || {}, row));
+
+  if (index >= 0 && stillVisible) {
+    state.rows[index] = Object.assign({}, state.rows[index], row);
+  } else if (index >= 0 && !stillVisible) {
+    state.rows.splice(index, 1);
+    state.selectedRows.delete(rowNo);
+  }
+
+  if (wasVisible && !stillVisible) {
+    state.filteredTotal = Math.max(0, state.filteredTotal - 1);
+    state.selectedRows.delete(rowNo);
+  } else if (!wasVisible && stillVisible) {
+    state.filteredTotal++;
+  }
+
+  if (state.current && Number(state.current.sheetRow) === rowNo) {
+    state.current = Object.assign({}, state.current, row);
+  }
+
+  if (!deferRender) {
+    renderStats(state.stats);
+    renderTable(state.rows);
+    renderPagination();
+    const metrics = document.getElementById('loadMetrics');
+    if (metrics) metrics.textContent = 'อัปเดตเฉพาะแถวและสถิติแล้ว';
+  }
+}
+
+function changeDashboardPage(delta) {
+  const totalPages = Math.max(1, Math.ceil(state.filteredTotal / state.pageSize));
+  const target = Math.min(totalPages, Math.max(1, state.page + Number(delta || 0)));
+  if (target === state.page) return;
+  loadData(target);
+}
+
+function renderStats(stats) {
+  const map = [
+    ['ทั้งหมด', stats.total || 0],
+    ['รอตรวจ', stats.pending || 0],
+    ['กดตรวจแล้ว ยังไม่เช็คคำ', stats.waitingWordCheck || 0],
+    ['มีปัญหา', stats.problem || 0]
+  ];
+
+  document.getElementById('stats').innerHTML = map.map(function(item) {
+    return '<div class="card stat"><div class="muted">' + item[0] + '</div><div class="n">' + item[1] + '</div></div>';
+  }).join('');
+}
+
+function statusPill(r) {
+  let cls = 'posted';
+  if (r.statusText === 'รอตรวจ') cls = 'pending';
+  if (r.statusText === 'กดตรวจแล้ว ยังไม่เช็คคำ') cls = 'checked';
+  if (r.statusText === 'มีปัญหา') cls = 'problem';
+  return '<span class="pill ' + cls + '">' + escapeHtml(r.statusText || '') + '</span>';
+}
+
+function renderTable(rows, debug) {
+  rows = rows || [];
+  if (!rows.length) {
+    const dbg = debug
+      ? ('\n\nชีต: ' + (debug.sheetName || '-') +
+         '\nlastRow: ' + (debug.lastRow || 0) +
+         '\nrawRows: ' + (debug.rawRows || 0) +
+         '\nmappedRows: ' + (debug.mappedRows || 0) +
+         '\nfilteredRows: ' + (debug.filteredRows || 0))
+      : '';
+    document.getElementById('tbody').innerHTML =
+      '<tr><td colspan="6" class="muted" style="white-space:pre-wrap">' +
+      'ไม่พบข้อมูลในโหมดนี้ ลองเปลี่ยนตัวกรองเป็น “ทั้งหมด” หรือเช็กชื่อชีต/คอลัมน์' +
+      escapeHtml(dbg) +
+      '</td></tr>';
+    syncCheckAllState();
+    return;
+  }
+
+  document.getElementById('tbody').innerHTML = rows.map(function(r) {
+    return ''
+      + '<tr>'
+      +   '<td><input type="checkbox" class="rowSel" value="' + r.sheetRow + '"' +
+            (state.selectedRows.has(Number(r.sheetRow)) ? ' checked' : '') +
+            ' onchange="handleRowSelectionChange(this)"></td>'
+      +   '<td>' + r.sheetRow + '</td>'
+      +   '<td>'
+      +     '<div style="font-weight:700">' + escapeHtml(r.title || '-') + '</div>'
+      +     '<div class="muted">' + escapeHtml(r.indexText || '') + '</div>'
+      +   '</td>'
+      +   '<td>' + statusPill(r) + '</td>'
+      +   '<td>' + escapeHtml(r.note || '') + '</td>'
+      +   '<td>'
+      +     '<div class="actions">'
+      +       '<button type="button" onclick="showDetail(' + r.sheetRow + ')">ดูรายละเอียด</button>'
+      +       '<button type="button" class="secondary" onclick="openDashboardRowDocument_(' + Number(r.sheetRow) + ')">เปิด Docs</button>'
+      +     '</div>'
+      +   '</td>'
+      + '</tr>';
+  }).join('');
+  syncCheckAllState();
+}
+
+function openDashboardRowDocument_(sheetRow) {
+  const rowNumber = Number(sheetRow);
+  const row = state.rowSnapshots.get(rowNumber) ||
+    state.rows.find(function(item) { return Number(item.sheetRow) === rowNumber; });
+  const url = row && row.openUrl;
+  if (!url) return false;
+  window.open(String(url), '_blank', 'noopener');
+  return true;
+}
+
+async function showDetail(sheetRow) {
+  const row = await callServer('getRowDetail', sheetRow, 'กำลังโหลดรายละเอียด...');
+  state.current = row;
+
+  document.getElementById('detailEmpty').style.display = 'none';
+  document.getElementById('detailBox').style.display = 'grid';
+
+  document.getElementById('dTitle').textContent = row.title || '-';
+  const tabs = row.tabs || [];
+  const tabCount = tabs.length || 0;
+  document.getElementById('dMeta').textContent = 'แถว ' + row.sheetRow + ' | พบแท็บ ' + tabCount + ' แท็บ';
+
+  document.getElementById('f_checked').checked = !!row.checked;
+  document.getElementById('f_knownWords').checked = !!row.knownWords;
+  document.getElementById('f_posted').checked = !!row.posted;
+  document.getElementById('f_noThai').checked = !!row.noThai;
+  document.getElementById('f_draftGroup').checked = !!row.draftGroup;
+  document.getElementById('f_note').value = row.note || '';
+
+  document.getElementById('tabs').innerHTML = tabCount
+    ? '<span class="tab-summary">พบแท็บทั้งหมด ' + tabCount + ' แท็บ</span>'
+    : '<span class="muted">ไม่พบข้อมูลแท็บ</span>';
+
+  document.getElementById('detailLog').textContent = row.tabsError || '';
+}
+
+function openCurrentDocument_() {
+  const url = state.current && state.current.openUrl;
+  if (!url) return false;
+  window.open(String(url), '_blank', 'noopener');
+  return true;
+}
+
+async function saveCurrent() {
+  if (!state.current) return;
+
+  const res = await callServer('updateCheckerFields', {
+    sheetRow: state.current.sheetRow,
+    checked: document.getElementById('f_checked').checked,
+    knownWords: document.getElementById('f_knownWords').checked,
+    posted: document.getElementById('f_posted').checked,
+    noThai: document.getElementById('f_noThai').checked,
+    draftGroup: document.getElementById('f_draftGroup').checked,
+    note: document.getElementById('f_note').value
+  }, 'กำลังบันทึกสถานะ...');
+
+  document.getElementById('detailLog').textContent = 'บันทึกสถานะแล้ว';
+  if (res && res.row) patchDashboardRow_(res.row);
+}
+
+// Fix timeout: config กลางฝั่ง client - ห้าม hardcode เลข chunk size กระจายหลายจุด
+// ต้องตรงกับ WEBAPP_SCAN_CONFIG_ ฝั่ง server (Checker_Main.txt) คนละ runtime กัน จึงประกาศแยกไว้ที่นี่
+const WEBAPP_SCAN_CONFIG_ = {
+  DEFAULT_CHUNK_SIZE: 3,
+  HEAVY_DOCUMENT_CHUNK_SIZE: 1,
+  SERVER_TIME_BUDGET_MS: 240000,
+  FINALIZE_TIME_BUDGET_MS: 180000
+};
+
+const SCAN_CHECKPOINT_KEY_ = 'checker.scan.checkpoint.v2';
+const SCAN_FAILURE_QUEUE_KEY_ = 'checker.scan.failureQueue.v3';
+const LEGACY_SCAN_CHECKPOINT_KEYS_ = ['checker.scan.checkpoint.v1'];
+const LEGACY_SCAN_FAILURE_QUEUE_KEYS_ = ['checker.scan.failureQueue.v2'];
+
+function scanStateContainsRawContent_(value) {
+  if (Array.isArray(value)) return value.some(scanStateContainsRawContent_);
+  if (!value || typeof value !== 'object') return false;
+  const blockedKeys = {
+    text: true,
+    signature: true,
+    contentSignature: true,
+    paragraphText: true,
+    finalParagraph: true,
+    oldText: true,
+    newText: true,
+    removedTexts: true,
+    changes: true,
+    from: true,
+    to: true,
+    before: true,
+    after: true,
+    documentName: true,
+    docName: true,
+    normalizedContent: true,
+    rawContent: true,
+    stack: true
+  };
+  return Object.keys(value).some(function(key) {
+    if (blockedKeys[key]) return true;
+    if (key === 'contentDigest') return !/^[a-f0-9]{64}$/.test(String(value[key] || ''));
+    return scanStateContainsRawContent_(value[key]);
+  });
+}
+
+function stripInternalScanMetadataForDisplay_(value) {
+  if (Array.isArray(value)) return value.map(stripInternalScanMetadataForDisplay_);
+  if (!value || typeof value !== 'object') return value;
+  const displayValue = {};
+  Object.keys(value).forEach(function(key) {
+    if (key !== 'contentDigest') {
+      displayValue[key] = stripInternalScanMetadataForDisplay_(value[key]);
+    }
+  });
+  return displayValue;
+}
+
+function removeLegacyScanStorage_() {
+  try {
+    LEGACY_SCAN_CHECKPOINT_KEYS_.forEach(function(key) { localStorage.removeItem(key); });
+    LEGACY_SCAN_FAILURE_QUEUE_KEYS_.forEach(function(key) { localStorage.removeItem(key); });
+  } catch (e) {}
+}
+
+function loadFailureQueue_() {
+  removeLegacyScanStorage_();
+  try {
+    const value = JSON.parse(localStorage.getItem(SCAN_FAILURE_QUEUE_KEY_) || '[]');
+    if (!Array.isArray(value)) {
+      localStorage.removeItem(SCAN_FAILURE_QUEUE_KEY_);
+      return [];
+    }
+    const safeJobs = value.filter(function(job) { return !scanStateContainsRawContent_(job); });
+    if (safeJobs.length !== value.length) {
+      localStorage.setItem(SCAN_FAILURE_QUEUE_KEY_, JSON.stringify(safeJobs));
+    }
+    return safeJobs;
+  } catch (e) {
+    try { localStorage.removeItem(SCAN_FAILURE_QUEUE_KEY_); } catch (ignored) {}
+    return [];
+  }
+}
+
+function saveFailureQueue_(jobs) {
+  const safeJobs = (jobs || []).filter(function(job) { return !scanStateContainsRawContent_(job); });
+  try { localStorage.setItem(SCAN_FAILURE_QUEUE_KEY_, JSON.stringify(safeJobs)); } catch (e) {}
+  renderFailureQueue_();
+}
+
+function renderFailureQueue_() {
+  const body = document.getElementById('failureQueueBody');
+  if (!body) return;
+  const jobs = loadFailureQueue_();
+  state.failureQueueRenderJobs = jobs.slice();
+  if (!jobs.length) {
+    body.innerHTML = '<tr><td colspan="4" class="muted">ไม่มีแท็บที่รอ Retry</td></tr>';
+    return;
+  }
+  body.innerHTML = jobs.map(function(job, jobIndex) {
+    const errors = job.summary && job.summary.tabErrors || [];
+    return errors.map(function(error) {
+      return '<tr>' +
+        '<td>' + Number(job.sheetRow || 0) + '</td>' +
+        '<td><strong>' + escapeHtml(error.tab || ('แท็บ ' + error.tabIndex)) + '</strong></td>' +
+        '<td>' + escapeHtml(error.message || '-') + '</td>' +
+        '<td><button type="button" class="secondary" data-job-index="' + Number(jobIndex) +
+        '" data-tab-index="' + Number(error.tabIndex) +
+        '" onclick="retryFailureFromButton_(this)">Retry แท็บนี้</button> ' +
+        '<button type="button" data-job-index="' + Number(jobIndex) +
+        '" onclick="retryFailureFromButton_(this)">Retry งานนี้ทั้งหมด</button></td>' +
+        '</tr>';
+    }).join('');
+  }).join('');
+}
+
+function retryFailureFromButton_(button) {
+  const jobIndex = Number(button && button.dataset && button.dataset.jobIndex);
+  const jobs = state.failureQueueRenderJobs || [];
+  const job = Number.isInteger(jobIndex) && jobIndex >= 0 ? jobs[jobIndex] : null;
+  if (!job) return false;
+  return retryFailureJob_(String(job.jobId || ''), Number(button.dataset.tabIndex || 0));
+}
+
+function updateBatchProgress_(sheetRow, summary, cursor, text) {
+  const total = Math.max(0, Number(summary && summary.tabTotal || 0));
+  const checked = Math.max(0, Number(summary && summary.tabChecked || cursor || 0));
+  const failed = (summary && summary.tabErrors || []).length;
+  const percent = total ? Math.min(100, Math.round((Math.min(total, Number(cursor || checked))) * 100 / total)) : 0;
+  const bar = document.getElementById('batchProgressBar');
+  const label = document.getElementById('batchProgressText');
+  const counts = document.getElementById('batchProgressCounts');
+  if (bar) bar.style.width = percent + '%';
+  if (label) label.textContent = text || ('กำลังตรวจแถว ' + sheetRow);
+  if (counts) counts.textContent = 'แท็บ ' + Math.min(total, Number(cursor || checked)) + '/' + total +
+    ' | สำเร็จ ' + Number(summary && summary.tabSucceeded || checked) + ' | ล้ม ' + failed;
+}
+
+function saveScanCheckpoint_(checkpoint) {
+  try {
+    if (scanStateContainsRawContent_(checkpoint)) {
+      localStorage.removeItem(SCAN_CHECKPOINT_KEY_);
+      return false;
+    }
+    localStorage.setItem(SCAN_CHECKPOINT_KEY_, JSON.stringify(checkpoint));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function loadScanCheckpoint_() {
+  removeLegacyScanStorage_();
+  try {
+    const raw = localStorage.getItem(SCAN_CHECKPOINT_KEY_);
+    const checkpoint = raw ? JSON.parse(raw) : null;
+    if (checkpoint && scanStateContainsRawContent_(checkpoint)) {
+      localStorage.removeItem(SCAN_CHECKPOINT_KEY_);
+      return null;
+    }
+    return checkpoint;
+  } catch (e) {
+    try { localStorage.removeItem(SCAN_CHECKPOINT_KEY_); } catch (ignored) {}
+    return null;
+  }
+}
+
+function clearScanCheckpoint_() {
+  try { localStorage.removeItem(SCAN_CHECKPOINT_KEY_); } catch (e) {}
+}
+
+function saveLastScanFailures_(sheetRow, docId, summary) {
+  const errors = summary && summary.tabErrors || [];
+  const jobs = loadFailureQueue_();
+  const identity = String(docId || '');
+  const existingIndex = jobs.findIndex(function(job) {
+    return identity ? job.docId === identity : Number(job.sheetRow) === Number(sheetRow);
+  });
+  if (!errors.length) {
+    if (existingIndex !== -1) jobs.splice(existingIndex, 1);
+  } else {
+    const job = {
+      jobId: identity || ('row-' + Number(sheetRow)),
+      docId: identity,
+      sheetRow: Number(sheetRow),
+      summary: summary,
+      savedAt: Date.now()
+    };
+    if (existingIndex === -1) jobs.push(job);
+    else jobs[existingIndex] = job;
+  }
+  saveFailureQueue_(jobs);
+}
+
+function requestStopScan() {
+  state.stopRequested = true;
+  setSelectionRangeHint_('ขอหยุดแล้ว ระบบจะหยุดหลังตรวจชุดแท็บปัจจุบันเสร็จ', false);
+}
+
+async function scanWholeDocumentInChunks(sheetRow, label, resumeState, options) {
+  options = options || {};
+  const lightScan = !!options.lightScan;
+  let cursor = Math.max(0, Number(resumeState && resumeState.cursor || 0));
+  let accumulated = resumeState && resumeState.accumulated || null;
+  let docId = String(resumeState && resumeState.docId || '');
+  const remainingRows = resumeState && Array.isArray(resumeState.remainingRows)
+    ? resumeState.remainingRows.slice()
+    : [];
+  let lastRes = null;
+  state.stopRequested = false;
+
+  const chunkSize = Math.max(1, Number(WEBAPP_SCAN_CONFIG_.DEFAULT_CHUNK_SIZE || 3));
+
+  while (true) {
+    const chunkNo = Math.floor(cursor / chunkSize) + 1;
+    const res = await callServer('scanWholeDocumentChunk', {
+      sheetRow: sheetRow,
+      docId: docId,
+      cursor: cursor,
+      chunkSize: chunkSize,
+      timeBudgetMs: WEBAPP_SCAN_CONFIG_.SERVER_TIME_BUDGET_MS,
+      accumulated: accumulated,
+      lightScan: lightScan,
+      finalize: false
+    }, (label || 'กำลังตรวจทุกแท็บ...') + ' ชุดแท็บ ' + chunkNo);
+
+    lastRes = res;
+    accumulated = res.checkpoint || accumulated;
+    cursor = res.nextCursor;
+    docId = String(res.docId || docId);
+    sheetRow = Number(res.sheetRow || sheetRow);
+    const progressSummary = res.summary || stripInternalScanMetadataForDisplay_(accumulated);
+    // timeBudgetReached ไม่ใช่ error - ถือเป็น partial success ปกติ แล้วทำชุดถัดไปต่ออัตโนมัติ
+    const progressLabel = res.timeBudgetReached
+      ? 'ชุดนี้ถึงขีดจำกัดเวลาปลอดภัย กำลังทำชุดถัดไป (' + Number((progressSummary && progressSummary.tabChecked) || cursor) + '/' + Number((progressSummary && progressSummary.tabTotal) || 0) + ' แท็บ)'
+      : label;
+    updateBatchProgress_(sheetRow, progressSummary, cursor, progressLabel);
+    saveScanCheckpoint_({
+      sheetRow: Number(sheetRow),
+      docId: docId,
+      cursor: cursor,
+      accumulated: accumulated,
+      remainingRows: remainingRows,
+      label: label || 'กำลังตรวจทุกแท็บ',
+      lightScan: lightScan,
+      savedAt: Date.now()
+    });
+
+    if (res.done) break;
+    if (state.stopRequested) {
+      return {
+        ok: true,
+        paused: true,
+        sheetRow: Number(sheetRow),
+        cursor: cursor,
+        summary: stripInternalScanMetadataForDisplay_(accumulated)
+      };
+    }
+  }
+
+  const finalizeRes = await callServer('scanWholeDocumentChunk', {
+    sheetRow: sheetRow,
+    docId: docId,
+    cursor: cursor,
+    chunkSize: chunkSize,
+    timeBudgetMs: WEBAPP_SCAN_CONFIG_.FINALIZE_TIME_BUDGET_MS,
+    accumulated: accumulated,
+    lightScan: lightScan,
+    finalize: true
+  }, 'กำลังบันทึกผลการตรวจ...');
+
+  const finalResult = finalizeRes || lastRes;
+  clearScanCheckpoint_();
+  docId = String(finalResult && finalResult.docId || docId);
+  sheetRow = Number(finalResult && finalResult.sheetRow || sheetRow);
+  updateBatchProgress_(sheetRow, finalResult && finalResult.summary, cursor, 'ตรวจแถว ' + sheetRow + ' เสร็จแล้ว');
+  saveLastScanFailures_(
+    sheetRow,
+    docId,
+    finalResult && (finalResult.retryState || finalResult.summary)
+  );
+  return finalResult;
+}
+
+async function resumeSavedScan() {
+  if (state.actionRunning) {
+    alert('มีงานกำลังทำอยู่ กรุณารอให้งานเดิมเสร็จก่อน');
+    return;
+  }
+  const checkpoint = loadScanCheckpoint_();
+  if (!checkpoint || !checkpoint.sheetRow) {
+    alert('ไม่พบงานตรวจที่หยุดไว้');
+    return;
+  }
+
+  state.actionRunning = true;
+  try {
+    let result = await scanWholeDocumentInChunks(
+      checkpoint.sheetRow,
+      checkpoint.label || ('ทำงานต่อแถว ' + checkpoint.sheetRow),
+      checkpoint,
+      { lightScan: !!checkpoint.lightScan }
+    );
+    if (result && result.row) patchDashboardRow_(result.row);
+    if (result && result.paused) {
+      alert('หยุดงานไว้แล้วที่ชุดแท็บถัดไป สามารถกด “ทำงานตรวจต่อ” ภายหลังได้');
+      return;
+    }
+
+    const remainingRows = Array.isArray(checkpoint.remainingRows)
+      ? checkpoint.remainingRows.slice()
+      : [];
+    let completedRows = 1;
+
+    for (let i = 0; i < remainingRows.length; i++) {
+      const queued = remainingRows[i] || {};
+      const row = Number(typeof queued === 'object' ? queued.sheetRow : queued);
+      const queuedDocId = String(typeof queued === 'object' ? queued.docId || '' : '');
+      const tail = remainingRows.slice(i + 1);
+      result = await scanWholeDocumentInChunks(
+        row,
+        'ทำงานต่อแถว ' + row,
+        { cursor: 0, accumulated: null, docId: queuedDocId, remainingRows: tail }
+      );
+      if (result && result.row) patchDashboardRow_(result.row, true);
+      if (result && result.paused) {
+        alert(
+          'ทำงานต่อสำเร็จ ' + completedRows + ' แถว และหยุดไว้ระหว่างแถว ' + row +
+          '\nกด “ทำงานตรวจต่อ” เพื่อทำต่อภายหลัง'
+        );
+        return;
+      }
+      completedRows++;
+    }
+
+    alert('ทำงานตรวจต่อจนเสร็จแล้ว ' + completedRows + ' แถว');
+  } finally {
+    state.actionRunning = false;
+    setLoading(false);
+  }
+}
+
+async function retryLastFailedTabs() {
+  if (state.actionRunning) {
+    alert('มีงานกำลังทำอยู่ กรุณารอให้งานเดิมเสร็จก่อน');
+    return;
+  }
+
+  const jobs = loadFailureQueue_();
+  if (!jobs.length) {
+    alert('ไม่พบรายการแท็บที่รอ Retry');
+    return;
+  }
+  return retryFailureJob_(jobs[0].jobId);
+}
+
+async function retryFailureJob_(jobId, onlyTabIndex) {
+  if (state.actionRunning) {
+    alert('มีงานกำลังทำอยู่ กรุณารอให้งานเดิมเสร็จก่อน');
+    return;
+  }
+  const saved = loadFailureQueue_().find(function(job) { return job.jobId === jobId; });
+  const errors = saved && saved.summary && saved.summary.tabErrors || [];
+  if (!saved || !errors.length) {
+    renderFailureQueue_();
+    alert('ไม่พบรายการ Retry นี้แล้ว');
+    return;
+  }
+  const selectedErrors = onlyTabIndex
+    ? errors.filter(function(item) { return Number(item.tabIndex) === Number(onlyTabIndex); })
+    : errors;
+  state.actionRunning = true;
+  try {
+    const retry = await callServer('retryFailedDocumentTabs', {
+      sheetRow: saved.sheetRow,
+      docId: saved.docId,
+      tabIndexes: selectedErrors.map(function(item) { return item.tabIndex; }),
+      accumulated: saved.summary
+    }, 'กำลัง Retry เฉพาะแท็บที่ล้ม...');
+
+    const finalized = await callServer('scanWholeDocumentChunk', {
+      sheetRow: saved.sheetRow,
+      docId: saved.docId,
+      cursor: 0,
+      chunkSize: WEBAPP_SCAN_CONFIG_.HEAVY_DOCUMENT_CHUNK_SIZE,
+      timeBudgetMs: WEBAPP_SCAN_CONFIG_.FINALIZE_TIME_BUDGET_MS,
+      accumulated: retry.retryState || retry.summary,
+      finalize: true
+    }, 'กำลังสรุปผลหลัง Retry...');
+
+    const currentRow = Number(finalized && finalized.sheetRow || retry.sheetRow || saved.sheetRow);
+    const currentDocId = String(finalized && finalized.docId || retry.docId || saved.docId || '');
+    saveLastScanFailures_(
+      currentRow,
+      currentDocId,
+      finalized && (finalized.retryState || finalized.summary)
+    );
+    updateBatchProgress_(
+      currentRow,
+      finalized && finalized.summary,
+      Number(finalized && finalized.summary && finalized.summary.tabTotal || 0),
+      'Retry แถว ' + currentRow + ' เสร็จแล้ว'
+    );
+    if (finalized && finalized.row) patchDashboardRow_(finalized.row);
+    alert(
+      'Retry แล้ว ' + Number(retry.retried || 0) + ' แท็บ\n' +
+      'สำเร็จ ' + Number(retry.succeeded || 0) + ' แท็บ\n' +
+      'ยังล้ม ' + Number(retry.failed || 0) + ' แท็บ'
+    );
+  } finally {
+    state.actionRunning = false;
+    setLoading(false);
+  }
+}
+
+async function scanCurrent() {
+  if (!state.current) return;
+  // Fix timeout: เดิมเรียก scanRowDocumentFull ซึ่งวน scanWholeDocumentChunk ทั้งเอกสารในคำสั่งเดียว
+  // (ไม่ยอม yield กลับ client ระหว่างแท็บ) เป็นสาเหตุ "เวลาประมวลผลเกินขีดจำกัดสูงสุด" กับเอกสารแท็บเยอะ
+  // เปลี่ยนมาใช้เส้นทาง chunk ปลอดภัยเดียวกับ "ตรวจทุกแท็บ" ที่ resume จาก checkpoint ได้เมื่อหมดเวลา
+  const res = await scanWholeDocumentInChunks(state.current.sheetRow, 'กำลังตรวจเอกสารนี้...');
+  document.getElementById('f_checked').checked = true;
+  document.getElementById('f_note').value = res.note || ((res.row && res.row.note) || '');
+  document.getElementById('detailLog').textContent = JSON.stringify(res.summary || {}, null, 2);
+  if (res && res.row) patchDashboardRow_(res.row);
+}
+
+async function formatCurrent() {
+  if (!state.current) return;
+  const res = await callServer('formatRowDocumentFull', state.current.sheetRow, 'กำลังจัดฟอร์แมตเอกสารนี้...');
+  document.getElementById('detailLog').textContent = JSON.stringify((res.result && res.result.report) || {}, null, 2);
+}
+
+async function scanWholeCurrent() {
+  if (!state.current) return;
+  const res = await scanWholeDocumentInChunks(state.current.sheetRow, 'กำลังตรวจทุกแท็บ');
+  document.getElementById('f_checked').checked = true;
+  document.getElementById('f_note').value = res.note || ((res.row && res.row.note) || '');
+  document.getElementById('detailLog').textContent = JSON.stringify(
+    stripInternalScanMetadataForDisplay_(res.summary || {}),
+    null,
+    2
+  );
+  if (res && res.row) patchDashboardRow_(res.row);
+}
+
+async function mergeCurrent() {
+  if (!state.current) return;
+  const res = await callServer('mergeChapterBackRow', state.current.sheetRow, 'กำลังรวมชื่อบทกลับ...');
+  document.getElementById('detailLog').textContent = JSON.stringify(res.result || {}, null, 2);
+}
+
+async function clearCurrent() {
+  if (!state.current) return;
+  const res = await callServer('clearHighlightsRow', state.current.sheetRow, 'กำลังล้างไฮไลต์...');
+  document.getElementById('detailLog').textContent = JSON.stringify(res.result || res || {}, null, 2);
+}
+
+async function watermarkCurrent(add) {
+  if (!state.current) return;
+  const res = await callServer(
+    'watermarkRow',
+    { sheetRow: state.current.sheetRow, add: add },
+    add ? 'กำลังใส่ลายน้ำ...' : 'กำลังลบลายน้ำ...'
+  );
+  document.getElementById('detailLog').textContent = JSON.stringify(res || {}, null, 2);
+}
+
+
+function getVisibleRowCheckboxes() {
+  return Array.from(document.querySelectorAll('.rowSel'));
+}
+
+function syncSelectionsFromVisible_() {
+  getVisibleRowCheckboxes().forEach(function(el) {
+    const row = Number(el.value);
+    if (!row) return;
+    if (el.checked) state.selectedRows.add(row);
+    else state.selectedRows.delete(row);
+  });
+}
+
+function handleRowSelectionChange(el) {
+  const row = Number(el && el.value);
+  if (row) {
+    if (el.checked) state.selectedRows.add(row);
+    else state.selectedRows.delete(row);
+  }
+  syncCheckAllState();
+}
+
+function updateSelectedCount() {
+  const selected = getSelectedRows();
+  const countEl = document.getElementById('selectCount');
+  if (countEl) countEl.textContent = 'เลือกแล้ว ' + selected.length + ' แถว';
+}
+
+function syncCheckAllState() {
+  const checkAll = document.getElementById('checkAllRows');
+  if (!checkAll) return;
+
+  const boxes = getVisibleRowCheckboxes();
+  syncSelectionsFromVisible_();
+  const checked = boxes.filter(function(el) { return el.checked; }).length;
+
+  checkAll.checked = boxes.length > 0 && checked === boxes.length;
+  checkAll.indeterminate = checked > 0 && checked < boxes.length;
+
+  updateSelectedCount();
+}
+
+function toggleCheckAllRows(checked) {
+  getVisibleRowCheckboxes().forEach(function(el) {
+    el.checked = !!checked;
+  });
+  syncCheckAllState();
+}
+
+function selectAllVisibleRows() {
+  toggleCheckAllRows(true);
+}
+
+function selectNextRows(n) {
+  n = Number(n) || 10;
+  const boxes = getVisibleRowCheckboxes();
+  let added = 0;
+
+  for (let i = 0; i < boxes.length && added < n; i++) {
+    if (!boxes[i].checked) {
+      boxes[i].checked = true;
+      added++;
+    }
+  }
+
+  syncCheckAllState();
+
+  if (added === 0) {
+    alert('เลือกครบทุกแถวในหน้านี้แล้ว');
+  }
+}
+
+function getSelectionRangeInputs_() {
+  const startEl = document.getElementById('selectStartRow');
+  const extraEl = document.getElementById('selectExtraRows');
+  const startRow = Number(startEl && startEl.value);
+  const extraRows = Number(extraEl && extraEl.value);
+
+  return {
+    startRow: Number.isInteger(startRow) && startRow > 0 ? startRow : null,
+    extraRows: Number.isInteger(extraRows) && extraRows >= 0 ? extraRows : null
+  };
+}
+
+function setSelectionRangeHint_(message, isError) {
+  const el = document.getElementById('selectRangeHint');
+  if (!el) return;
+  el.textContent = message;
+  el.style.color = isError ? 'var(--danger)' : 'var(--muted)';
+}
+
+function selectCheckboxesInSheetRowRange_(startRow, endRow, clearExisting) {
+  const boxes = getVisibleRowCheckboxes();
+  let matched = 0;
+
+  boxes.forEach(function(el) {
+    const sheetRow = Number(el.value);
+    const inRange = sheetRow >= startRow && sheetRow <= endRow;
+    if (clearExisting) el.checked = inRange;
+    else if (inRange) el.checked = true;
+    if (inRange) matched++;
+  });
+
+  syncCheckAllState();
+  return matched;
+}
+
+/**
+ * เลือกช่วงตามเลขแถวจริงใน Google Sheets
+ * ตัวอย่าง start=7, extra=3 => เลือก 7, 8, 9, 10
+ */
+function selectSpecifiedRowRange() {
+  const input = getSelectionRangeInputs_();
+  if (input.startRow == null) {
+    setSelectionRangeHint_('กรุณาระบุแถวเริ่ม เช่น 7', true);
+    return;
+  }
+  if (input.extraRows == null) {
+    setSelectionRangeHint_('จำนวนแถวเพิ่มต้องเป็นเลขจำนวนเต็มตั้งแต่ 0 ขึ้นไป', true);
+    return;
+  }
+
+  const endRow = input.startRow + input.extraRows;
+  const matched = selectCheckboxesInSheetRowRange_(input.startRow, endRow, true);
+
+  if (!matched) {
+    setSelectionRangeHint_(
+      'ไม่พบแถว ' + input.startRow + '–' + endRow + ' ในตารางที่แสดงอยู่ กรุณาเปลี่ยนตัวกรองหรือค้นหาใหม่',
+      true
+    );
+    return;
+  }
+
+  setSelectionRangeHint_(
+    'เลือกแถว ' + input.startRow + '–' + endRow + ' แล้ว ' + matched + ' แถว' +
+      (matched < input.extraRows + 1 ? ' (บางแถวไม่อยู่ในหน้าที่แสดง)' : ''),
+    false
+  );
+}
+
+/**
+ * ใช้แถวที่เลือกเลขสูงสุดเป็นจุดเริ่ม แล้วเพิ่ม checkbox ของแถวถัดไป
+ * โดยไม่ยกเลิกรายการที่เลือกไว้ก่อนหน้า
+ */
+function extendSelectionFromLastRow() {
+  const selected = getSelectedRows().sort(function(a, b) { return a - b; });
+  if (!selected.length) {
+    setSelectionRangeHint_('กรุณาเลือก checkbox อย่างน้อย 1 แถวก่อน', true);
+    return;
+  }
+
+  const input = getSelectionRangeInputs_();
+  if (input.extraRows == null) {
+    setSelectionRangeHint_('จำนวนแถวเพิ่มต้องเป็นเลขจำนวนเต็มตั้งแต่ 0 ขึ้นไป', true);
+    return;
+  }
+
+  const startRow = selected[selected.length - 1];
+  const endRow = startRow + input.extraRows;
+  const matched = selectCheckboxesInSheetRowRange_(startRow, endRow, false);
+
+  setSelectionRangeHint_(
+    'เพิ่มการเลือกจากแถว ' + startRow + ' ถึง ' + endRow +
+      (matched < input.extraRows + 1 ? ' (บางแถวไม่อยู่ในหน้าที่แสดง)' : ''),
+    matched === 0
+  );
+}
+
+function clearAllSelections() {
+  state.selectedRows.clear();
+  getVisibleRowCheckboxes().forEach(function(el) { el.checked = false; });
+  syncCheckAllState();
+  setSelectionRangeHint_('ยกเลิกการเลือกทั้งหมดแล้ว', false);
+}
+
+function getSelectedRows() {
+  return Array.from(state.selectedRows)
+    .map(function(row) { return Number(row); })
+    .filter(Boolean)
+    .sort(function(a, b) { return a - b; });
+}
+
+async function runBatchAction(selected, actionName, runner, loadingPrefix, summarizeResults) {
+  if (!selected.length) {
+    alert('เลือกแถวก่อน');
+    return;
+  }
+  if (state.actionRunning) {
+    alert('มีงานกำลังทำอยู่ กรุณารอให้งานเดิมเสร็จก่อน');
+    return;
+  }
+
+  state.actionRunning = true;
+  document.querySelectorAll('[data-batch-action]').forEach(function(button) {
+    button.disabled = true;
+  });
+  let ok = 0;
+  let fail = 0;
+  let paused = false;
+  const errors = [];
+  const allResults = [];
+
+  for (let i = 0; i < selected.length; i++) {
+    const row = selected[i];
+    setLoading(true, loadingPrefix + ' ' + (i + 1) + '/' + selected.length + ' (แถว ' + row + ')');
+
+    try {
+      const result = await runner(row);
+      allResults.push(result);
+      if (result && result.row) patchDashboardRow_(result.row, true);
+      if (result && result.paused) {
+        const checkpoint = loadScanCheckpoint_();
+        if (checkpoint) {
+          checkpoint.remainingRows = selected.slice(i + 1).map(function(sheetRow) {
+            const snapshot = state.rowSnapshots.get(Number(sheetRow)) || {};
+            return { sheetRow: Number(sheetRow), docId: String(snapshot.docId || '') };
+          });
+          checkpoint.batchAction = actionName;
+          saveScanCheckpoint_(checkpoint);
+        }
+        paused = true;
+        break;
+      }
+      ok++;
+    } catch (err) {
+      fail++;
+      errors.push('แถว ' + row + ': ' + normalizeServerError(err));
+    }
+  }
+
+  setLoading(false);
+  state.actionRunning = false;
+  document.querySelectorAll('[data-batch-action]').forEach(function(button) {
+    button.disabled = false;
+  });
+  renderStats(state.stats);
+  renderTable(state.rows);
+  renderPagination();
+  const metrics = document.getElementById('loadMetrics');
+  if (metrics) metrics.textContent = 'อัปเดต batch เฉพาะแถวและสถิติแล้ว';
+
+  let msg = actionName + 'เสร็จ ' + ok + '/' + selected.length + ' แถว';
+  if (paused) {
+    msg += '\nหยุดไว้ระหว่างแถวปัจจุบัน กด “ทำงานตรวจต่อ” เพื่อทำต่อจากแท็บล่าสุด';
+  }
+  if (fail > 0) {
+    msg += '\nไม่สำเร็จ ' + fail + ' แถว';
+    if (errors.length) msg += '\n\n' + errors.slice(0, 5).join('\n');
+  }
+  if (typeof summarizeResults === 'function') {
+    const extra = summarizeResults(allResults);
+    if (extra) msg += '\n\n' + extra;
+  }
+  msg += '\n\nอัปเดตเฉพาะแถวและสถิติแล้ว';
+  alert(msg);
+}
+
+async function scanSelected() {
+  const selected = getSelectedRows();
+  await runBatchAction(selected, 'ตรวจ', function(row) {
+    return scanWholeDocumentInChunks(row, 'กำลังตรวจแถว ' + row + ' (ไม่จัดฟอร์แมต)', null, { lightScan: true });
+  }, 'กำลังตรวจ', summarizeLightScanResults);
+}
+
+function summarizeLightScanResults(results) {
+  const lines = [];
+  (results || []).forEach(function(res) {
+    if (!res || !res.ok || !res.finalized) return;
+    const parts = [];
+    const lang = String(res.noteLanguage || '');
+    if (lang && lang.indexOf('ไม่พบตัวอักษรต่างประเทศ') === -1) parts.push('L ภาษา: ' + lang);
+    const seq = String(res.noteSequence || '');
+    if (seq && seq.indexOf('เลขบทเรียงต่อเนื่อง') === -1) parts.push('M เลขบท: ' + seq);
+    const other = String(res.noteOther || '');
+    if (other && other.indexOf('ทุกแท็บมีเนื้อหา') === -1) parts.push('N อื่น ๆ: ' + other);
+    if (parts.length) lines.push('แถว ' + res.sheetRow + ':\n- ' + parts.join('\n- '));
+  });
+  if (!lines.length) return 'ทุกแถวผ่าน: ไม่พบต่างประเทศ เลขบทเรียงต่อเนื่อง ไม่มีเรื่องราวอื่น (ผลเต็มอยู่คอลัมน์ L/M/N)';
+  return 'ผลการตรวจ (ผลเต็มอยู่คอลัมน์ L/M/N):\n' + lines.slice(0, 10).join('\n');
+}
+
+async function mergeSelected() {
+  const selected = getSelectedRows();
+  await runBatchAction(selected, 'รวมชื่อบทกลับ', function(row) {
+    return callServer('mergeChapterBackRow', row);
+  }, 'กำลังรวมชื่อบท');
+}
+
+async function watermarkSelected(add) {
+  const selected = getSelectedRows();
+  await runBatchAction(selected, add ? 'ใส่ลายน้ำ' : 'ลบลายน้ำ', function(row) {
+    return callServer('watermarkRow', { sheetRow: row, add: add });
+  }, add ? 'กำลังใส่ลายน้ำ' : 'กำลังลบลายน้ำ');
+}
+
+async function checkEmptyTabsSelected() {
+  const selected = getSelectedRows();
+  await runBatchAction(selected, 'ตรวจแท็บว่าง', function(row) {
+    const snapshot = state.rowSnapshots.get(Number(row)) || {};
+    return callServer('checkRowEmptyTabs', {
+      sheetRow: row,
+      docId: String(snapshot.docId || '')
+    });
+  }, 'กำลังตรวจแท็บว่าง', summarizeEmptyTabResults);
+}
+
+function summarizeEmptyTabResults(results) {
+  const lines = [];
+  (results || []).forEach(function(res) {
+    if (!res || !res.ok) return;
+    const rowParts = [];
+    if (Number(res.emptyTabCount || 0) > 0) {
+      rowParts.push('ไม่มีเนื้อหา แท็บ ' + res.emptyTabNumbers.join(', '));
+    }
+    if (Number(res.announcementTabCount || 0) > 0) {
+      rowParts.push('เข้าข่ายประกาศ แท็บ ' + res.announcementTabNumbers.join(', '));
+    }
+    if (Number(res.titleColonFixed || 0) > 0) {
+      rowParts.push('ลบ : ในชื่อบท ' + res.titleColonFixed + ' จุด');
+    }
+    if (Number(res.emDashFixed || 0) > 0) {
+      rowParts.push('แทนที่ — เป็น ... ' + res.emDashFixed + ' จุด');
+    }
+    if (Number(res.thaiDigitFixed || 0) > 0) {
+      rowParts.push('แปลงเลขไทยเป็นอารบิก ' + res.thaiDigitFixed + ' ตัว');
+    }
+    if (rowParts.length) lines.push('แถว ' + res.sheetRow + ': ' + rowParts.join(' | '));
+  });
+  if (!lines.length) return 'ไม่พบแท็บที่ไม่มีเนื้อหา/เข้าข่ายประกาศ และไม่มีจุดที่ต้องแก้ (colon ชื่อบท / — / เลขไทย)';
+  return 'ผลการตรวจ:\n' + lines.slice(0, 20).join('\n');
+}
+
+async function checkTailJunkSelected() {
+  const selected = getSelectedRows();
+  await runBatchAction(selected, 'ตรวจขยะท้ายบท', function(row) {
+    const snapshot = state.rowSnapshots.get(Number(row)) || {};
+    return callServer('checkRowTailJunk', {
+      sheetRow: row,
+      docId: String(snapshot.docId || '')
+    });
+  }, 'กำลังตรวจขยะท้ายบท', summarizeTailJunkResults);
+}
+
+function summarizeTailJunkResults(results) {
+  const lines = [];
+  (results || []).forEach(function(res) {
+    if (!res || !res.ok) return;
+    if (Number(res.tailJunkTabCount || 0) > 0) {
+      lines.push('แถว ' + res.sheetRow + ': ' + (res.tailJunkSummary || ('แท็บ ' + res.tailJunkTabNumbers.join(', '))));
+    }
+  });
+  if (!lines.length) return 'ไม่พบข้อความขยะท้ายบทในแถวที่เลือก (คอลัมน์ M ถูกล้างแล้ว)';
+  return 'พบข้อความขยะท้ายบท:\n' + lines.slice(0, 20).join('\n');
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, function(c) {
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+  });
+}
+
+function escapeAttr(s) {
+  return escapeHtml(s);
+}
+
+function restoreDashboardPreferences_() {
+  try {
+    const savedQuery = localStorage.getItem('checker.dashboard.query');
+    if (savedQuery) document.getElementById('q').value = savedQuery;
+  } catch (e) {}
+}
+
+function saveDashboardPreferences_() {
+  try {
+    localStorage.setItem('checker.dashboard.query', document.getElementById('q').value);
+  } catch (e) {}
+}
+
+document.getElementById('mode').addEventListener('change', function() {
+  saveDashboardPreferences_();
+  loadData(1);
+});
+document.getElementById('q').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    saveDashboardPreferences_();
+    loadData(1);
+  }
+});
+restoreDashboardPreferences_();
+renderFailureQueue_();
+loadData(1);
+window.addEventListener('focus', checkForExternalCheckerUpdates_);
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible') checkForExternalCheckerUpdates_();
+});
+</script>
+</body>
+</html>

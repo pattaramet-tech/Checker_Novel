@@ -1,0 +1,409 @@
+/****************************************************
+Sidebar.html
+****************************************************/
+
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: Arial, sans-serif; padding: 12px; font-size: 13px; }
+    h3 { margin: 8px 0 6px; }
+    h4 { margin: 14px 0 6px; border-top: 1px solid #ddd; padding-top: 12px; }
+    button { width: 100%; padding: 9px; margin: 6px 0; cursor: pointer; }
+    textarea { width: 100%; min-height: 180px; box-sizing: border-box; font-family: monospace; font-size: 12px; }
+    input, select { width: 100%; box-sizing: border-box; padding: 7px; margin: 4px 0 8px; }
+    label { font-weight: bold; display: block; margin-top: 6px; }
+    .msg { white-space: pre-wrap; background: #f5f5f5; padding: 8px; margin-top: 8px; border-radius: 6px; }
+    .small { color: #666; font-size: 12px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .checkrow { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+    .checkrow input { width: auto; margin: 0; }
+    .primary { background:#0F766E; color:#fff; border:0; border-radius:6px; }
+    .secondary { background:#e5e7eb; border:0; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <h3>Novel Helper</h3>
+  <p class="small">ลำดับแนะนำ: Build Queue → Export JSON → ส่งให้ Claude → Import JSON → Apply Edits</p>
+
+  <label>โหมด Build Queue</label>
+  <select id="buildMode">
+    <option value="manualRows">ระบุแถวเอง</option>
+    <option value="keyword" selected>ค้นจากคอลัมน์ L</option>
+  </select>
+
+  <label>เลขแถว (ใช้เมื่อเลือก "ระบุแถวเอง")</label>
+  <textarea id="manualRows" style="min-height:50px;" placeholder="เช่น 1296,1300,1304 หรือ 1296-1309"></textarea>
+
+  <label>จำนวนแถวสูงสุด (maxRows)</label>
+  <input id="maxRows" type="number" min="1" value="3">
+
+  <label>คีย์เวิร์ดคอลัมน์ L (ใช้เมื่อเลือก "ค้นจากคอลัมน์ L")</label>
+  <textarea id="noteKeywords" style="min-height:50px;">เลขบทเรียง
+พบแท็บ</textarea>
+
+  <button class="primary" onclick="buildQueue()">1) Build Queue</button>
+  <div class="row" style="margin-top:0;">
+    <button class="secondary" onclick="refreshJobStatus()">Refresh Status</button>
+    <button class="secondary" onclick="cancelJob()">Cancel Job</button>
+  </div>
+  <button class="secondary" onclick="resetNextBatchCycle()">Reset Next Batch Cycle</button>
+  <button onclick="exportJson()">2) Export Latest Batch JSON</button>
+  <button class="secondary" onclick="exportAllPendingJson()">Export All Pending (Backlog)</button>
+  <button onclick="copyPrompt()">Copy Claude Prompt</button>
+  <textarea id="box" placeholder="Tasks JSON หรือ Claude edits JSON"></textarea>
+  <button onclick="importJson()">3) Import Claude Edits JSON</button>
+  <button onclick="applyEdits()">4) Apply Ready Edits + Update Column L</button>
+
+  <div id="msg" class="msg"></div>
+<h4>ตรวจจำนวน/เนื้อหา Google Docs Tabs</h4>
+
+<label>เลขแถวที่ต้องการตรวจ</label>
+
+<textarea
+  id="tabAuditRows"
+  style="min-height:55px;"
+  placeholder="เช่น 1500-1550 หรือ 1500,1505,1510"
+></textarea>
+
+<button
+  class="primary"
+  onclick="startNovelTabAudit()"
+>
+  ตรวจ Docs Tabs
+</button>
+
+<script>
+  let novelTabAuditState = null;
+
+
+function startNovelTabAudit() {
+  const rowsSpec =
+    document
+      .getElementById('tabAuditRows')
+      .value
+      .trim();
+
+  if (!rowsSpec) {
+    setMsg('กรุณาระบุเลขแถว เช่น 1500-1550');
+    return;
+  }
+
+  novelTabAuditState = {
+    rowsSpec: rowsSpec,
+    cursor: 0,
+    lines: []
+  };
+
+  setMsg(
+    'กำลังตรวจ Google Docs Tabs...\n' +
+    'ช่วงแถว: ' + rowsSpec
+  );
+
+  runNovelTabAuditBatch();
+}
+
+
+function runNovelTabAuditBatch() {
+  if (!novelTabAuditState) {
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+
+      res = res || {};
+
+      if (!novelTabAuditState) {
+        return;
+      }
+
+
+      const results =
+        Array.isArray(res.results)
+          ? res.results
+          : [];
+
+
+      results.forEach(function(item) {
+
+        if (!item.ok) {
+          novelTabAuditState.lines.push(
+            'แถว ' +
+            item.row +
+            ' | ERROR | ' +
+            (item.error || 'Unknown error')
+          );
+
+          return;
+        }
+
+
+        let line =
+          'แถว ' +
+          item.row +
+          ' | ' +
+          item.totalTabs +
+          ' แท็บ' +
+          ' | มีเนื้อหา ' +
+          item.contentTabs +
+          ' | ไม่มีเนื้อหา ' +
+          item.emptyTabs;
+
+
+        if (
+          Array.isArray(item.emptyTabNumbers) &&
+          item.emptyTabNumbers.length
+        ) {
+          line +=
+            ' | ว่าง: ' +
+            item.emptyTabNumbers.join(', ');
+        }
+
+
+        novelTabAuditState.lines.push(line);
+      });
+
+
+      novelTabAuditState.cursor =
+        Number(res.nextCursor || 0);
+
+
+      const header = [
+        res.done
+          ? 'ตรวจเสร็จแล้ว'
+          : 'กำลังตรวจ...',
+
+        'ประมวลผล ' +
+          Number(res.processed || 0) +
+          '/' +
+          Number(res.totalRows || 0) +
+          ' แถว'
+      ].join('\n');
+
+
+      setMsg(
+        header +
+        '\n\n' +
+        novelTabAuditState.lines.join('\n')
+      );
+
+
+      if (!res.done) {
+        /*
+         * แต่ละรอบตรวจ 2 Docs
+         * แล้วเรียก Apps Script execution ใหม่
+         *
+         * จึงไม่ลาก execution เดียวยาวจน timeout
+         */
+        setTimeout(
+          runNovelTabAuditBatch,
+          300
+        );
+
+        return;
+      }
+
+
+      novelTabAuditState = null;
+
+    })
+    .withFailureHandler(function(e) {
+
+      const message =
+        e && e.message
+          ? e.message
+          : String(e);
+
+      setMsg(
+        'ตรวจไม่สำเร็จ\n' +
+        message
+      );
+
+      novelTabAuditState = null;
+    })
+    .checkNovelTabsBatchFromSidebar({
+      rowsSpec: novelTabAuditState.rowsSpec,
+      cursor: novelTabAuditState.cursor
+    });
+}
+
+function setMsg(x) {
+  document.getElementById('msg').textContent =
+    typeof x === 'string' ? x : JSON.stringify(x, null, 2);
+}
+
+function collectBuildQueueSettings() {
+  return {
+    buildMode: document.getElementById('buildMode').value,
+    manualRows: document.getElementById('manualRows').value,
+    maxRows: Number(document.getElementById('maxRows').value || 3),
+    noteKeywords: document.getElementById('noteKeywords').value
+  };
+}
+
+function buildQueue() {
+  const settings = collectBuildQueueSettings();
+  setMsg('กำลังสร้างคิว...');
+  google.script.run
+    .withSuccessHandler(showBuildQueueResult)
+    .withFailureHandler(e => setMsg(e.message))
+    .buildNovelQueueFromSidebar(settings);
+}
+
+function refreshJobStatus() {
+  setMsg('กำลังตรวจสอบสถานะ...');
+  google.script.run
+    .withSuccessHandler(showJobStatus)
+    .withFailureHandler(e => setMsg(e.message))
+    .getNovelBuildQueueJobStatus();
+}
+
+function cancelJob() {
+  if (!confirm('ยืนยันการยกเลิกงาน?')) return;
+  setMsg('กำลังยกเลิก...');
+  google.script.run
+    .withSuccessHandler(r => setMsg(r && r.message ? r.message : JSON.stringify(r)))
+    .withFailureHandler(e => setMsg(e.message))
+    .cancelNovelBuildQueueJob();
+}
+
+function resetNextBatchCycle() {
+  const settings = collectBuildQueueSettings();
+  if (settings.buildMode === 'manualRows') { setMsg('โหมดระบุแถวเองไม่ใช้ Next Batch cycle'); return; }
+  if (!confirm('ยืนยัน Reset Next Batch Cycle สำหรับชุดคีย์เวิร์ดนี้? AI_QUEUE / AI_LOG / Column L จะไม่ถูกลบ')) return;
+  setMsg('กำลัง Reset Next Batch cycle...');
+  google.script.run
+    .withSuccessHandler(r => {
+      if (r && r.ok === false) { setMsg(r.error || 'Reset ไม่สำเร็จ'); return; }
+      const parts = [r.message || 'Reset แล้ว', `ทำแล้ว ${Number(r.processedCount || 0)}`, `เหลือ ${Number(r.remainingCandidates || 0)}`];
+      setMsg(parts.join(' / '));
+    })
+    .withFailureHandler(e => setMsg(e.message))
+    .resetNovelNextBatchCycle(settings);
+}
+
+function showJobStatus(res) {
+  res = res || {};
+  if (res.status === 'IDLE') { setMsg('ไม่มีงาน'); return; }
+  const parts = [
+    'สถานะ: ' + (res.status || '?'),
+    res.total ? ('แถว ' + Number(res.cursor || 0) + '/' + Number(res.total)) : '',
+    'งาน ' + Number(res.queuedTasks || 0),
+    'ใช้เวลา ' + ((Number(res.elapsedMs || 0) / 1000).toFixed(1)) + ' วินาที'
+  ].filter(Boolean);
+  const errs = Number(res.errorCount || 0);
+  if (errs) parts.push('ผิดพลาด ' + errs + ' รายการ');
+  if (res.nextBatchEnabled) {
+    parts.push('Next Batch ทำแล้ว ' + Number(res.cycleProcessedCount || 0));
+    parts.push('เหลือ ' + Number(res.cycleRemainingCandidates || 0));
+  }
+  setMsg(parts.join(' / ') + (res.message ? '\n' + res.message : ''));
+}
+
+function showBuildQueueResult(res) {
+  res = res || {};
+  const status = String(res.status || '');
+  const errorCount = Number(res.errorCount != null ? res.errorCount : (Array.isArray(res.errors) ? res.errors.length : 0));
+  const problemRows = Number(res.problemRows || 0);
+  const summary = [
+    status === 'SCHEDULED' ? ('กำลังดำเนินการ ' + Number(res.cursor || 0) + '/' + Number(res.total || 0) + ' แถว') : '',
+    `ประมวลผล ${Number(res.processedRows || 0)} แถว`,
+    `สร้างคิว ${Number(res.queuedTasks || 0)} งาน`,
+    `อัปเดตคอลัมน์ L ${Number(res.notesUpdated || 0)} แถว`,
+    `ค่าเดิมอยู่แล้ว ${Number(res.unchangedRows || 0)} แถว`,
+    `ข้อผิดพลาด ${errorCount} รายการ`,
+    `แถวต้องตรวจ ${problemRows} แถว`,
+    (res.cycleProcessedCount != null || res.cycleRemainingCandidates != null)
+      ? `Next Batch ทำแล้ว ${Number(res.cycleProcessedCount || 0)} / เหลือ ${Number(res.cycleRemainingCandidates || 0)}`
+      : ''
+  ].filter(Boolean).join(' / ');
+  const detail = String(res.message || '').trim();
+  const warning = String(res.revisionWarning || '').trim();
+  let output = detail && detail.indexOf(summary) !== -1 ? detail : summary + (detail ? '\n' + detail : '');
+  if (warning && output.indexOf(warning) === -1) {
+    output += '\nคำเตือน: ' + warning;
+  }
+  if (status === 'SCHEDULED') {
+    output += '\n(งานกำลังดำเนินการต่อในพื้นหลัง — กดรีเฟรชสถานะเพื่อดูความคืบหน้า)';
+  }
+  setMsg(output);
+}
+
+function exportJson() {
+  setMsg('กำลัง export Latest Batch...');
+  google.script.run
+    .withSuccessHandler(json => {
+      document.getElementById('box').value = json;
+      setMsg('Export Latest Batch แล้ว ให้ copy JSON นี้ไปส่งให้ Claude');
+    })
+    .withFailureHandler(e => setMsg(e.message))
+    .exportNovelPendingJson();
+}
+
+function exportAllPendingJson() {
+  if (!confirm('Export งาน PENDING ทั้งหมดจากทุก Build Queue? ใช้สำหรับ backlog/recovery เท่านั้น')) return;
+  setMsg('กำลัง export All Pending...');
+  google.script.run
+    .withSuccessHandler(json => {
+      document.getElementById('box').value = json;
+      setMsg('Export All Pending แล้ว');
+    })
+    .withFailureHandler(e => setMsg(e.message))
+    .exportNovelAllPendingJson();
+}
+
+function copyPrompt() {
+  google.script.run
+    .withSuccessHandler(prompt => {
+      document.getElementById('box').value = prompt + '\n\nต่อไปนี้คือ JSON งานที่ต้องแก้:\n';
+      setMsg('คัด prompt ลงกล่องแล้ว ให้กด Export Tasks JSON แล้วนำ JSON ไปต่อท้าย prompt นี้');
+    })
+    .withFailureHandler(e => setMsg(e.message))
+    .getNovelPromptForClaude();
+}
+
+function importJson() {
+  const text = document.getElementById('box').value;
+  setMsg('กำลังนำเข้า JSON...');
+  google.script.run
+    .withSuccessHandler(setMsg)
+    .withFailureHandler(e => setMsg(e.message))
+    .importNovelClaudeJson(text);
+}
+
+function applyEdits() {
+  setMsg('กำลัง apply edits...');
+  google.script.run
+    .withSuccessHandler(showApplyResult)
+    .withFailureHandler(e => setMsg(e.message))
+    .applyNovelReadyEdits();
+}
+
+function showApplyResult(res) {
+  res = res || {};
+  const summary = [
+    `Apply สำเร็จ ${Number(res.applied || 0)} งาน`,
+    `error ${Number(res.errors || 0)} งาน`,
+    `อัปเดตคอลัมน์ L ${Number(res.notesUpdated || 0)} แถว`,
+    `ยังติดเงื่อนไข ${Number(res.blockedRows || 0)} แถว`,
+    `ค่าเดิมอยู่แล้ว ${Number(res.unchangedRows || 0)} แถว`
+  ].join(' / ');
+  const detail = String(res.message || '').trim();
+  const warning = String(res.revisionWarning || '').trim();
+  let output = detail && detail.indexOf(summary) !== -1 ? detail : summary + (detail ? '\n' + detail : '');
+  if (warning && output.indexOf(warning) === -1) {
+    output += '\nคำเตือน: ' + warning;
+  }
+  setMsg(output);
+}
+
+
+
+window.addEventListener('load', function() {
+  setMsg('พร้อมใช้งาน');
+});
+</script>
+</body>
+</html>
