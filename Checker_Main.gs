@@ -1408,9 +1408,17 @@ function resolveMappedRowByIdentity_(sheetRow, docId) {
   var values = sh.getRange(CHECKER_CFG.START_ROW, 1, rowCount, lastCol).getDisplayValues();
   applyRichTextUrlsToRows_(sh, CHECKER_CFG.START_ROW, values);
 
+  // หา "ทุก" แถวที่ตรง DocID — ถ้าซ้ำหลายแถวต้องหยุดให้ตรวจสอบ ห้ามเลือกแถวแรกเอง
+  var matches = [];
   for (var i = 0; i < values.length; i++) {
     var mapped = mapRow_(CHECKER_CFG.START_ROW + i, values[i]);
-    if (mapped.docId === expectedDocId) return mapped;
+    if (mapped.docId === expectedDocId) matches.push(mapped);
+  }
+
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    var rowList = matches.map(function(m2) { return m2.sheetRow; }).join(', ');
+    throw new Error('พบ DocID ซ้ำในหลายแถว (แถว ' + rowList + ') กรุณาตรวจสอบชีตก่อนตรวจต่อ');
   }
   throw new Error('ไม่พบเอกสารเดิมในชีต อาจถูกลบหรือเปลี่ยนลิงก์');
 }

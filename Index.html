@@ -910,7 +910,7 @@ function clearScanCheckpoint_() {
   try { localStorage.removeItem(SCAN_CHECKPOINT_KEY_); } catch (e) {}
 }
 
-function saveLastScanFailures_(sheetRow, docId, summary) {
+function saveLastScanFailures_(sheetRow, docId, summary, lightScan) {
   const errors = summary && summary.tabErrors || [];
   const jobs = loadFailureQueue_();
   const identity = String(docId || '');
@@ -925,6 +925,7 @@ function saveLastScanFailures_(sheetRow, docId, summary) {
       docId: identity,
       sheetRow: Number(sheetRow),
       summary: summary,
+      lightScan: !!lightScan,
       savedAt: Date.now()
     };
     if (existingIndex === -1) jobs.push(job);
@@ -941,6 +942,19 @@ function requestStopScan() {
 async function scanWholeDocumentInChunks(sheetRow, label, resumeState, options) {
   options = options || {};
   const lightScan = !!options.lightScan;
+  const runId = 'ls-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  const startedAtMs = Date.now();
+  let chunkCount = 0;
+  const perfTotals = { counts: {}, stages: {} };
+  const addPerf = function(perf) {
+    if (!perf) return;
+    Object.keys(perf.counts || {}).forEach(function(k) {
+      perfTotals.counts[k] = (perfTotals.counts[k] || 0) + Number(perf.counts[k] || 0);
+    });
+    Object.keys(perf.stages || {}).forEach(function(k) {
+      perfTotals.stages[k] = (perfTotals.stages[k] || 0) + Number(perf.stages[k] || 0);
+    });
+  };
   let cursor = Math.max(0, Number(resumeState && resumeState.cursor || 0));
   let accumulated = resumeState && resumeState.accumulated || null;
   let docId = String(resumeState && resumeState.docId || '');
@@ -962,10 +976,13 @@ async function scanWholeDocumentInChunks(sheetRow, label, resumeState, options) 
       timeBudgetMs: WEBAPP_SCAN_CONFIG_.SERVER_TIME_BUDGET_MS,
       accumulated: accumulated,
       lightScan: lightScan,
+      runId: runId,
       finalize: false
     }, (label || 'กำลังตรวจทุกแท็บ...') + ' ชุดแท็บ ' + chunkNo);
 
     lastRes = res;
+    addPerf(res && res.perf);
+    chunkCount++;
     accumulated = res.checkpoint || accumulated;
     cursor = res.nextCursor;
     docId = String(res.docId || docId);
@@ -1007,18 +1024,27 @@ async function scanWholeDocumentInChunks(sheetRow, label, resumeState, options) 
     timeBudgetMs: WEBAPP_SCAN_CONFIG_.FINALIZE_TIME_BUDGET_MS,
     accumulated: accumulated,
     lightScan: lightScan,
+    runId: runId,
     finalize: true
   }, 'กำลังบันทึกผลการตรวจ...');
 
   const finalResult = finalizeRes || lastRes;
+  addPerf(finalizeRes && finalizeRes.perf);
   clearScanCheckpoint_();
   docId = String(finalResult && finalResult.docId || docId);
   sheetRow = Number(finalResult && finalResult.sheetRow || sheetRow);
+  if (finalResult) {
+    finalResult.wallMs = Date.now() - startedAtMs;
+    finalResult.chunks = chunkCount;
+    finalResult.perfAggregated = perfTotals;
+    finalResult.runId = runId;
+  }
   updateBatchProgress_(sheetRow, finalResult && finalResult.summary, cursor, 'ตรวจแถว ' + sheetRow + ' เสร็จแล้ว');
   saveLastScanFailures_(
     sheetRow,
     docId,
-    finalResult && (finalResult.retryState || finalResult.summary)
+    finalResult && (finalResult.retryState || finalResult.summary),
+    lightScan
   );
   return finalResult;
 }
@@ -1061,7 +1087,8 @@ async function resumeSavedScan() {
       result = await scanWholeDocumentInChunks(
         row,
         'ทำงานต่อแถว ' + row,
-        { cursor: 0, accumulated: null, docId: queuedDocId, remainingRows: tail }
+        { cursor: 0, accumulated: null, docId: queuedDocId, remainingRows: tail },
+        { lightScan: !!checkpoint.lightScan }
       );
       if (result && result.row) patchDashboardRow_(result.row, true);
       if (result && result.paused) {
@@ -1112,11 +1139,14 @@ async function retryFailureJob_(jobId, onlyTabIndex) {
     : errors;
   state.actionRunning = true;
   try {
+    // retry ต้องคงโหมดเดิมของงาน: lightScan ห้ามหลุดไป full scan
+    const savedLightScan = !!(saved && saved.lightScan);
     const retry = await callServer('retryFailedDocumentTabs', {
       sheetRow: saved.sheetRow,
       docId: saved.docId,
       tabIndexes: selectedErrors.map(function(item) { return item.tabIndex; }),
-      accumulated: saved.summary
+      accumulated: saved.summary,
+      lightScan: savedLightScan
     }, 'กำลัง Retry เฉพาะแท็บที่ล้ม...');
 
     const finalized = await callServer('scanWholeDocumentChunk', {
@@ -1126,6 +1156,7 @@ async function retryFailureJob_(jobId, onlyTabIndex) {
       chunkSize: WEBAPP_SCAN_CONFIG_.HEAVY_DOCUMENT_CHUNK_SIZE,
       timeBudgetMs: WEBAPP_SCAN_CONFIG_.FINALIZE_TIME_BUDGET_MS,
       accumulated: retry.retryState || retry.summary,
+      lightScan: savedLightScan,
       finalize: true
     }, 'กำลังสรุปผลหลัง Retry...');
 
@@ -1134,7 +1165,8 @@ async function retryFailureJob_(jobId, onlyTabIndex) {
     saveLastScanFailures_(
       currentRow,
       currentDocId,
-      finalized && (finalized.retryState || finalized.summary)
+      finalized && (finalized.retryState || finalized.summary),
+      savedLightScan
     );
     updateBatchProgress_(
       currentRow,
@@ -1483,7 +1515,15 @@ function summarizeLightScanResults(results) {
     if (seq && seq.indexOf('เลขบทเรียงต่อเนื่อง') === -1) parts.push('M เลขบท: ' + seq);
     const other = String(res.noteOther || '');
     if (other && other.indexOf('ทุกแท็บมีเนื้อหา') === -1) parts.push('N อื่น ๆ: ' + other);
+    if (res.skippedWrites && res.skippedWrites.length) {
+      parts.push('⚠️ ข้ามเขียนคอลัมน์ ' + res.skippedWrites.join(', ') + ' (เซลล์เดิมเป็นลิงก์)');
+    }
     if (parts.length) lines.push('แถว ' + res.sheetRow + ':\n- ' + parts.join('\n- '));
+    const timingBits = [];
+    if (res.wallMs != null) timingBits.push('⏱ ' + (Number(res.wallMs) / 1000).toFixed(1) + ' วิ');
+    if (res.chunks != null) timingBits.push('chunks ' + res.chunks);
+    if (res.version) timingBits.push('v ' + res.version);
+    if (timingBits.length) lines.push('  (' + timingBits.join(' | ') + ')');
   });
   if (!lines.length) return 'ทุกแถวผ่าน: ไม่พบต่างประเทศ เลขบทเรียงต่อเนื่อง ไม่มีเรื่องราวอื่น (ผลเต็มอยู่คอลัมน์ L/M/N)';
   return 'ผลการตรวจ (ผลเต็มอยู่คอลัมน์ L/M/N):\n' + lines.slice(0, 10).join('\n');

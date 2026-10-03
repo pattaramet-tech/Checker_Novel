@@ -474,7 +474,8 @@ function summarizeBatchTotals_(totals) {
     endingPendingPromoTabs: totals.endingPendingPromoTabs || [],
     endingMissingMarkerTabs: totals.endingMissingMarkerTabs || [],
     titleColonFixed: Number(totals.titleColonFixed || 0),
-    thaiDigitFixed: Number(totals.thaiDigitFixed || 0)
+    thaiDigitFixed: Number(totals.thaiDigitFixed || 0),
+    untranslatedChecked: Number(totals.untranslatedChecked || 0)
   });
 }
 
@@ -580,6 +581,7 @@ function mergeBatchTotals_(base, add) {
 
   base.titleColonFixed = Number(base.titleColonFixed || 0) + Number(add.titleColonFixed || 0);
   base.thaiDigitFixed = Number(base.thaiDigitFixed || 0) + Number(add.thaiDigitFixed || 0);
+  base.untranslatedChecked = Number(base.untranslatedChecked || 0) + Number(add.untranslatedChecked || 0);
 
   return base;
 }
@@ -1375,6 +1377,8 @@ function scanWholeDocumentChunk(payload) {
   // แก้เนื้อหาเบาเฉพาะ 3 อย่างที่อนุมัติ: — -> ..., ลบ : หลังเลขบท, เลขไทย -> อารบิก
   // สรุปผลแยก 3 หมวด: L = ภาษา, M = เลขบท/เนื้อหาซ้ำ, N = อื่น ๆ (แท็บว่าง/ขยะท้ายบท/โปรโมตท้ายบท)
   var lightScan = !!payload.lightScan;
+  var execStartedAt = Date.now();
+  if (lightScan) lightScanPerfInit_(payload.runId);
   var logChunkPerf_ = (typeof logCheckerScanChunkPerf_ === 'function')
     ? logCheckerScanChunkPerf_
     : function() {};
@@ -1387,7 +1391,9 @@ function scanWholeDocumentChunk(payload) {
   if (!row || !row.docId) throw new Error('ไม่พบ docId ของแถวนี้');
 
   var doc = openDocByIdSafe_(row.docId);
+  lightScanPerfCount_('docOpens');
   var tabs = doc.getTabs ? getAllTabsFlat_(doc) : [];
+  lightScanPerfCount_('tabsListed', tabs.length);
   var tabTotal = tabs.length || 1;
 
   accumulated.tabTotal = Math.max(Number(accumulated.tabTotal || 0), tabTotal);
@@ -1412,13 +1418,26 @@ function scanWholeDocumentChunk(payload) {
     // ห้ามเปิด getBody()/getText() ของทุกแท็บซ้ำอีกรอบตรงนี้ - ถ้าไม่มีข้อมูลสะสม (เช่น finalize
     // ถูกเรียกตรงจาก retry เก่าที่ไม่ผ่าน chunk loop) ค่อย fallback ไปสแกนแบบเดิมเป็นทางเลือกสำรอง
     var untranslatedTabs = finalSummary.untranslatedEnglishTabs || [];
-    if (!untranslatedTabs.length && typeof checkerFindUntranslatedEnglishTabsInDoc_ === 'function') {
+    // coverage: แยก "ตรวจครบแล้วไม่พบ" ออกจาก "ตรวจไม่ครบ" — ตรวจครบแล้วต้องไม่อ่านทุกแท็บซ้ำ
+    // (โหมดเต็ม untranslatedChecked เป็น 0 เสมอ จึง fallback แบบเดิมทุกครั้ง)
+    var untranslatedCoverage = {
+      checked: Number(finalSummary.untranslatedChecked || 0),
+      total: Number(finalSummary.tabTotal || 0),
+      complete: Number(finalSummary.untranslatedChecked || 0) >= Number(finalSummary.tabTotal || 0) &&
+                finalSummary.tabErrors.length === 0
+    };
+    var untranslatedFallbackRan = false;
+    if (!untranslatedTabs.length && !untranslatedCoverage.complete && typeof checkerFindUntranslatedEnglishTabsInDoc_ === 'function') {
       try {
         untranslatedTabs = checkerFindUntranslatedEnglishTabsInDoc_(doc) || [];
+        untranslatedFallbackRan = true;
+        lightScanPerfCount_('fallbackUntranslatedScans');
       } catch (eLang) {
         untranslatedTabs = [];
       }
     }
+    finalSummary.untranslatedCoverage = untranslatedCoverage;
+    finalSummary.untranslatedFallbackRan = untranslatedFallbackRan;
 
     var untranslatedEnglishTabNos = untranslatedTabs.map(function(t) { return t.tabNo; });
     var untranslatedEnglishMessage = (typeof checkerBuildUntranslatedEnglishMessage_ === 'function')
@@ -1444,8 +1463,17 @@ function scanWholeDocumentChunk(payload) {
         checked: true,
         note: colNotes.noteLanguage
       });
-      writeLightScanColumnValue_(sheetRow, LIGHT_SCAN_COLUMNS_.SEQUENCE, colNotes.noteSequence);
-      writeLightScanColumnValue_(sheetRow, LIGHT_SCAN_COLUMNS_.OTHER, colNotes.noteOther);
+      lightScanPerfCount_('sheetWrites');
+      var skippedWrites = [];
+      if (!writeLightScanColumnValue_(sheetRow, LIGHT_SCAN_COLUMNS_.SEQUENCE, colNotes.noteSequence)) skippedWrites.push('M');
+      if (!writeLightScanColumnValue_(sheetRow, LIGHT_SCAN_COLUMNS_.OTHER, colNotes.noteOther)) skippedWrites.push('N');
+
+      var lightPerf = lightScanPerfSnapshot_();
+      if (lightPerf) {
+        lightPerf.executionMs = Date.now() - execStartedAt;
+        lightPerf.skippedWrites = skippedWrites;
+        try { console.log('[LightScanPerf] ' + JSON.stringify(lightPerf)); } catch (eLog) {}
+      }
 
       logChunkPerf_('FINALIZE_SUMMARY_DONE', {
         sheetRow: sheetRow,
@@ -1460,6 +1488,9 @@ function scanWholeDocumentChunk(payload) {
         finalized: true,
         done: true,
         lightScan: true,
+        version: LIGHT_SCAN_VERSION_,
+        perf: lightPerf,
+        skippedWrites: skippedWrites,
         note: colNotes.noteLanguage,
         noteLanguage: colNotes.noteLanguage,
         noteSequence: colNotes.noteSequence,
@@ -1570,19 +1601,16 @@ function scanWholeDocumentChunk(payload) {
 
   if (!tabs.length) {
     if (cursor === 0) {
-      var singleResult = withDocTabContext_(row.docId, row.tabId, function() {
-        var checkResult = (lightScan && typeof runAllChecksLightScan_ === 'function')
+      var singleResult = withOpenDocTabContext_(doc, row.tabId, function() {
+        var isLight = lightScan && typeof runAllChecksLightScan_ === 'function';
+        var checkResult = isLight
           ? runAllChecksLightScan_()
           : runAllChecks();
-        if (lightScan) {
-          try {
-            var lightBody = getActiveBody_();
-            checkResult.__lightBodyText = (lightBody && typeof lightBody.getText === 'function') ? lightBody.getText() : '';
-            checkResult.__lightJunkGroups = (typeof scanTabTailJunkGroups_ === 'function') ? scanTabTailJunkGroups_(lightBody) : [];
-          } catch (eLight) {
-            checkResult.__lightBodyText = '';
-            checkResult.__lightJunkGroups = [];
-          }
+        if (!isLight) {
+          // lightScan คำนวณ untranslated จาก snapshot แล้ว ไม่อ่านซ้ำ
+          checkResult.untranslatedEnglishInfo = (typeof computeUntranslatedEnglishInfoForActiveTab_ === 'function')
+            ? computeUntranslatedEnglishInfoForActiveTab_()
+            : null;
         }
         return checkResult;
       });
@@ -1660,7 +1688,10 @@ function scanWholeDocumentChunk(payload) {
       });
 
       accumulateWebAppExtrasIntoBatchTotals_(batchTotals, singleResult, singleName, 1);
-      if (lightScan) accumulateLightScanTabExtras_(batchTotals, singleResult, 1);
+      if (lightScan) {
+        accumulateLightScanTabExtras_(batchTotals, singleResult, 1);
+        batchTotals.untranslatedChecked = (batchTotals.untranslatedChecked || 0) + 1;
+      }
     }
 
     var singleMerged = mergeBatchTotals_(accumulated, batchTotals);
@@ -1673,7 +1704,8 @@ function scanWholeDocumentChunk(payload) {
       sheetRow: sheetRow,
       nextCursor: 1,
       summary: sanitizeCheckerPublicSummary_(singleMerged),
-      checkpoint: sanitizeCheckerCheckpointSummary_(singleMerged)
+      checkpoint: sanitizeCheckerCheckpointSummary_(singleMerged),
+      perf: lightScan ? lightScanPerfSnapshot_() : null
     };
   }
 
@@ -1708,22 +1740,16 @@ function scanWholeDocumentChunk(payload) {
     logChunkPerf_('START', { sheetRow: sheetRow, tabIndex: tabIndex, tabName: tabName });
 
     try {
-      var result = withDocTabContext_(row.docId, tabId, function() {
-        var checkResult = (lightScan && typeof runAllChecksLightScan_ === 'function')
+      var result = withOpenDocTabContext_(doc, tab, function() {
+        var isLight = lightScan && typeof runAllChecksLightScan_ === 'function';
+        var checkResult = isLight
           ? runAllChecksLightScan_()
           : runAllChecks();
-        checkResult.untranslatedEnglishInfo = (typeof computeUntranslatedEnglishInfoForActiveTab_ === 'function')
-          ? computeUntranslatedEnglishInfoForActiveTab_()
-          : null;
-        if (lightScan) {
-          try {
-            var lightBody = getActiveBody_();
-            checkResult.__lightBodyText = (lightBody && typeof lightBody.getText === 'function') ? lightBody.getText() : '';
-            checkResult.__lightJunkGroups = (typeof scanTabTailJunkGroups_ === 'function') ? scanTabTailJunkGroups_(lightBody) : [];
-          } catch (eLight) {
-            checkResult.__lightBodyText = '';
-            checkResult.__lightJunkGroups = [];
-          }
+        if (!isLight) {
+          // lightScan คำนวณ untranslated จาก snapshot ใน runAllChecksLightScan_ แล้ว ไม่อ่านซ้ำ
+          checkResult.untranslatedEnglishInfo = (typeof computeUntranslatedEnglishInfoForActiveTab_ === 'function')
+            ? computeUntranslatedEnglishInfoForActiveTab_()
+            : null;
         }
         return checkResult;
       });
@@ -1807,7 +1833,10 @@ function scanWholeDocumentChunk(payload) {
       });
 
       accumulateWebAppExtrasIntoBatchTotals_(batchTotals, result, tabName, tabIndex);
-      if (lightScan) accumulateLightScanTabExtras_(batchTotals, result, tabIndex);
+      if (lightScan) {
+        accumulateLightScanTabExtras_(batchTotals, result, tabIndex);
+        batchTotals.untranslatedChecked = (batchTotals.untranslatedChecked || 0) + 1;
+      }
       batchTotals.tabSucceeded++;
 
       logChunkPerf_('DONE', {
@@ -1850,7 +1879,8 @@ function scanWholeDocumentChunk(payload) {
     nextCursor: nextCursor,
     summary: sanitizeCheckerPublicSummary_(merged),
     checkpoint: sanitizeCheckerCheckpointSummary_(merged),
-    timeBudgetReached: timeBudgetReached
+    timeBudgetReached: timeBudgetReached,
+    perf: lightScan ? lightScanPerfSnapshot_() : null
   };
 }
 
@@ -1858,6 +1888,10 @@ function retryFailedDocumentTabs(payload) {
   payload = payload || {};
   var sheetRow = Number(payload.sheetRow);
   if (!sheetRow) throw new Error('sheetRow ไม่ถูกต้อง');
+  // retry ต้องคงโหมดเดิม: lightScan ห้ามหลุดไป full scan
+  var lightScan = !!payload.lightScan;
+  var execStartedAt = Date.now();
+  if (lightScan) lightScanPerfInit_(payload.runId);
 
   var accumulated = summarizeBatchTotals_(payload.accumulated || {});
   var requested = Array.isArray(payload.tabIndexes) ? payload.tabIndexes : [];
@@ -1876,7 +1910,9 @@ function retryFailedDocumentTabs(payload) {
   sheetRow = row.sheetRow;
   if (!row || !row.docId) throw new Error('ไม่พบ docId ของแถวนี้');
   var doc = openDocByIdSafe_(row.docId);
+  lightScanPerfCount_('docOpens');
   var tabs = doc.getTabs ? getAllTabsFlat_(doc) : [];
+  lightScanPerfCount_('tabsListed', tabs.length);
 
   // เอา error เก่าของแท็บที่กำลัง retry ออก แล้วใส่กลับเฉพาะแท็บที่ยังล้ม
   accumulated.tabErrors = (accumulated.tabErrors || []).filter(function(item) {
@@ -1899,10 +1935,24 @@ function retryFailedDocumentTabs(payload) {
     var tabId = tab.getId ? tab.getId() : '';
     var tabName = getTabNameSafe_(tab, tabIndex - 1);
     try {
-      var result = withDocTabContext_(row.docId, tabId, function() {
-        return runAllChecks();
+      // ใช้ tab object ที่มีอยู่แล้ว — ไม่เปิดเอกสารซ้ำต่อแท็บ ไม่ fallback ไปแท็บแรก
+      var result = withOpenDocTabContext_(doc, tab, function() {
+        var isLight = lightScan && typeof runAllChecksLightScan_ === 'function';
+        var checkResult = isLight
+          ? runAllChecksLightScan_()
+          : runAllChecks();
+        if (!isLight) {
+          checkResult.untranslatedEnglishInfo = (typeof computeUntranslatedEnglishInfoForActiveTab_ === 'function')
+            ? computeUntranslatedEnglishInfoForActiveTab_()
+            : null;
+        }
+        return checkResult;
       });
       addTabRunResultToBatchTotals_(retryTotals, result, tabName, tabIndex);
+      if (lightScan) {
+        accumulateLightScanTabExtras_(retryTotals, result, tabIndex);
+        retryTotals.untranslatedChecked = (retryTotals.untranslatedChecked || 0) + 1;
+      }
     } catch (error) {
       retryTotals.tabErrors.push({
         tab: tabName,
@@ -1914,6 +1964,8 @@ function retryFailedDocumentTabs(payload) {
   });
 
   var merged = mergeBatchTotals_(accumulated, retryTotals);
+  var retryPerf = lightScan ? lightScanPerfSnapshot_() : null;
+  if (retryPerf) retryPerf.executionMs = Date.now() - execStartedAt;
   return {
     ok: true,
     docId: row.docId,
@@ -1921,6 +1973,8 @@ function retryFailedDocumentTabs(payload) {
     retried: retryIndexes.length,
     succeeded: retryIndexes.length - retryTotals.tabErrors.length,
     failed: retryTotals.tabErrors.length,
+    lightScan: lightScan,
+    perf: retryPerf,
     tabErrors: sanitizeCheckerPublicValue_(retryTotals.tabErrors),
     summary: sanitizeCheckerPublicSummary_(merged),
     retryState: sanitizeCheckerCheckpointSummary_(merged)
@@ -2838,57 +2892,88 @@ function detectEnglishSourceReportOnly_() {
 }
 
 /**
- * โหมดตรวจเบาต่อแท็บ: ตรวจครบ + แก้เนื้อหาเบา 3 อย่าง ไม่จัดฟอร์แมตใด ๆ
- * โครงผลลัพธ์ใช้ key เดียวกับ runAllChecks() ที่ pipeline สะสมอยู่แล้ว
- * ขั้นตอนที่ข้าม: ลบอักษรละตินพิเศษ, ไฮไลต์คำต่างประเทศ, จัดหัวบท/แปลงหัวบท,
- * ลบวงเล็บ/ชื่อซ้ำ/หัวบทซ้ำ, แยกบรรทัด, ย่อหน้า/ระยะห่าง, ลบบรรทัดว่าง, ฟอนต์ Sarabun
+ * โหมดตรวจเบาต่อแท็บ (perf-1: single-pass snapshot)
+ * อ่านข้อความย่อหน้าครั้งเดียว แล้ว cleanup + ตัวตรวจทุกกลุ่มใช้ข้อความชุดเดียวกัน
+ * - cleanup: — → ..., و → ล, เลขไทย → อารบิก, ลบ : หลังเลขบท (รักษาฟอร์แมต)
+ * - หลังแก้ จะ re-read เฉพาะย่อหน้า dirty เพื่อให้ตัวตรวจเห็นข้อความล่าสุด
+ * - ขั้นตอนที่ข้าม: ลบอักษรละตินพิเศษ, ไฮไลต์คำต่างประเทศ, จัดหัวบท/แปลงหัวบท,
+ *   ลบวงเล็บ/ชื่อซ้ำ/หัวบทซ้ำ, แยกบรรทัด, ย่อหน้า/ระยะห่าง, ลบบรรทัดว่าง, ฟอนต์ Sarabun
  */
 function runAllChecksLightScan_() {
-  // แก้เนื้อหาเบา 1: — -> ... (และ و -> ล ตามเวอร์ชันเดิม)
-  const rep = replaceEmDashWithEllipsis();
+  var body = getActiveBody_();
+  var paras = lightScanPerfTimed_('getParas', function() { return body.getParagraphs(); });
+  lightScanPerfCount_('paragraphGets');
+  var paraTexts = paras.map(function(p) {
+    lightScanPerfCount_('paraTextReads');
+    return p.getText();
+  });
 
-  // แก้เนื้อหาเบา 2: ลบ : หลังเลขบท / 3: เลขไทย -> อารบิก
-  const titleColonFixed = (typeof fixChapterTitleColonsInBody_ === 'function')
-    ? Number(fixChapterTitleColonsInBody_(getActiveBody_()) || 0)
-    : 0;
-  const thaiDigitFixed = (typeof convertThaiDigitsInBody_ === 'function')
-    ? Number(convertThaiDigitsInBody_(getActiveBody_()) || 0)
-    : 0;
+  if (typeof resetForeignWordAllowListCache_ === 'function') resetForeignWordAllowListCache_();
 
-  // ===== ตรวจทั้งหมด (detection only) =====
-  const nonThaiCount = countForeignCharactersReportOnly_();
+  // ===== cleanup เนื้อหาเบา (แก้เฉพาะย่อหน้าที่มีจุดแก้ รักษาฟอร์แมตส่วนอื่น) =====
+  var cleanup = applyLightScanCleanups_(paras, paraTexts);
+  cleanup.dirtyIndexes.forEach(function(i) {
+    lightScanPerfCount_('dirtyParaTextReads');
+    paraTexts[i] = paras[i].getText();
+  });
 
-  const sourceNoChapterNote = (typeof detectSourceNoChapterNote_ === 'function')
-    ? detectSourceNoChapterNote_()
-    : { found: 0, note: '', paragraphIndex: null, matchedText: '' };
+  var joinedText = paraTexts.join('\n');
 
-  const englishSourceCleanup = (typeof detectEnglishSourceReportOnly_ === 'function')
-    ? detectEnglishSourceReportOnly_()
-    : { detected: 0, removed: 0, removedParagraphs: 0, examples: [] };
+  // ===== ตรวจทั้งหมดจากข้อความชุดเดียวกัน (ไม่อ่านเอกสารซ้ำ) =====
+  var nonThaiCount = lightScanPerfTimed_('checkForeign', function() {
+    return countForeignCharactersFromTexts_(paraTexts);
+  });
 
-  const endingCleanup = (typeof detectEndingPromoReportOnly_ === 'function')
-    ? detectEndingPromoReportOnly_()
-    : { changed: false, removedPromoLines: 0, pendingPromoLines: 0, hadEndMarker: true };
+  var sourceNoChapterNote = lightScanPerfTimed_('checkSourceNoChapter', function() {
+    var found = detectSourceNoChapterNoteInLines_(paraTexts, SOURCE_NO_CHAPTER_NOTE_CONFIG_);
+    return found.found
+      ? { found: 1, note: 'ต้นฉบับไม่มีบทที่', paragraphIndex: found.paragraphIndex + 1, matchedText: found.matchedText }
+      : { found: 0, note: '', paragraphIndex: null, matchedText: '' };
+  });
 
-  const chapterSequence = (typeof checkChapterSequenceInBody_ === 'function')
-    ? checkChapterSequenceInBody_()
-    : { ok: true, totalFound: 0, chapters: [], issues: [] };
+  var englishSourceCleanup = lightScanPerfTimed_('checkEnglishSource', function() {
+    return detectEnglishSourceFromTexts_(paraTexts);
+  });
 
-  const longEnglish = (typeof checkerScanLongEnglishParagraphsInActiveBody_ === 'function')
-    ? checkerScanLongEnglishParagraphsInActiveBody_()
-    : { paragraphCount: 0 };
+  var endingCleanup = lightScanPerfTimed_('checkEnding', function() {
+    return detectEndingPromoFromTexts_(paraTexts);
+  });
+
+  var chapterSequence = lightScanPerfTimed_('checkSequence', function() {
+    var scan = collectChapterScanFromTexts_(paras, paraTexts);
+    return checkChapterSequenceFromChapters_(scan.chapters);
+  });
+
+  var longEnglish = lightScanPerfTimed_('checkLongEnglish', function() {
+    return checkerScanLongEnglishFromTexts_(paraTexts);
+  });
+
+  var untranslatedEnglishInfo = lightScanPerfTimed_('checkUntranslated', function() {
+    return computeUntranslatedEnglishFromTexts_(joinedText);
+  });
+
+  var tabClass = lightScanPerfTimed_('checkEmptyClassify', function() {
+    return checkerClassifyTabContent_(joinedText);
+  });
+
+  var junkGroups = lightScanPerfTimed_('checkJunk', function() {
+    return scanTabTailJunkFromTexts_(paraTexts);
+  });
 
   return {
-    replacedEmDashCount: Number(rep && rep.emDashCount || 0),
-    replacedWawCount: Number(rep && rep.wawCount || 0),
+    replacedEmDashCount: cleanup.counts.emDash,
+    replacedWawCount: cleanup.counts.waw,
     nonThaiCount: nonThaiCount,
-    titleColonFixed: titleColonFixed,
-    thaiDigitFixed: thaiDigitFixed,
+    titleColonFixed: cleanup.counts.colon,
+    thaiDigitFixed: cleanup.counts.thaiDigit,
     sourceNoChapterNote: sourceNoChapterNote,
     englishSourceCleanup: englishSourceCleanup,
     endingCleanup: endingCleanup,
     chapterSequence: chapterSequence,
-    longEnglishParagraphCount: Number(longEnglish && longEnglish.paragraphCount || 0)
+    longEnglishParagraphCount: Number(longEnglish && longEnglish.paragraphCount || 0),
+    untranslatedEnglishInfo: untranslatedEnglishInfo,
+    __lightClass: tabClass,
+    __lightJunkGroups: junkGroups
   };
 }
 
@@ -2897,9 +2982,7 @@ function accumulateLightScanTabExtras_(batchTotals, result, tabIndex) {
   result = result || {};
   tabIndex = Number(tabIndex);
 
-  var info = (result.__lightBodyText != null)
-    ? checkerClassifyTabContent_(result.__lightBodyText)
-    : { hasNoContent: false, meaningfulParagraphCount: 0, isSourceNoteTab: false };
+  var info = result.__lightClass || { hasNoContent: false, meaningfulParagraphCount: 0, isSourceNoteTab: false };
 
   if (checkerShouldFlagEmptyTab_(info)) {
     batchTotals.emptyTabNumbers = batchTotals.emptyTabNumbers || [];
@@ -2930,8 +3013,20 @@ function accumulateLightScanTabExtras_(batchTotals, result, tabIndex) {
 
 function writeLightScanColumnValue_(sheetRow, column, value) {
   try {
-    getCheckerSheet_().getRange(Number(sheetRow), Number(column)).setValue(value || '');
-  } catch (e) {}
+    var range = getCheckerSheet_().getRange(Number(sheetRow), Number(column));
+    var existing = String(range.getDisplayValue() || '').trim();
+    // กันทับข้อมูลคนละประเภท: เซลล์เดิมเป็นลิงก์ (PDF/ZIP) แต่ข้อความใหม่ไม่ใช่ลิงก์ = ข้าม
+    // (ผลลัพธ์จะถูกรายงานกลับใน skippedWrites ของ response และ log)
+    if (/^https?:\/\//i.test(existing) && !/^https?:\/\//i.test(String(value || ''))) {
+      lightScanPerfCount_('skippedUrlWrites');
+      return false;
+    }
+    range.setValue(value || '');
+    lightScanPerfCount_('sheetWrites');
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 /**
@@ -2945,11 +3040,16 @@ function buildLightScanColumnNotes_(summary, doc) {
 
   // ===== L: ภาษา =====
   var lang = [];
+  var coverage = summary.untranslatedCoverage || null;
+  var coverageIncomplete = !!coverage && coverage.complete === false;
   var nonThai = Number(summary.nonThaiCount || 0);
   if (nonThai > 0) {
     lang.push('พบตัวอักษรต่างประเทศ ' + nonThai + ' ตัว');
     var foreignNames = (summary.foreignTabNames || []).slice(0, 50);
     if (foreignNames.length) lang.push('พบแท็บมีคำต่างประเทศ: ' + foreignNames.join(', '));
+  } else if (coverageIncomplete) {
+    // findings ว่างเพราะตรวจไม่ครบ — ห้ามรายงานว่าผ่าน
+    lang.push('ยังตรวจไม่ครบ (' + coverage.checked + '/' + coverage.total + ' แท็บ) — ยังสรุปไม่ได้ว่าไม่พบตัวอักษรต่างประเทศ');
   } else {
     lang.push('ไม่พบตัวอักษรต่างประเทศ');
   }
@@ -3072,6 +3172,10 @@ function buildLightScanColumnNotes_(summary, doc) {
   }
   if (fixStats.length) other.push('แก้แล้ว: ' + fixStats.join(' | '));
 
+  if (summary.untranslatedFallbackRan) {
+    other.push('ตรวจไม่ครบ — สแกน untranslated ซ้ำทั้งเอกสารอัตโนมัติ');
+  }
+
   var noteLanguage = dedupeCheckerNotes_(lang.join(' | '));
   var noteSequence = dedupeCheckerNotes_(seq.join(' | '));
   var noteOther = dedupeCheckerNotes_(other.join(' | '));
@@ -3086,4 +3190,468 @@ function buildLightScanColumnNotes_(summary, doc) {
     noteSequence: noteSequence,
     noteOther: noteOther
   };
+}
+
+/* =========================================================
+ * LightScan PERF (perf-1): instrumentation + single-pass snapshot
+ * - เพิ่มขึ้นจากงานเพิ่มความเร็ว "ตรวจแถวที่เลือก" บน branch perf/lightscan-fast
+ * - วัดผ่าน run ID ต่องาน: นับจำนวนเปิดเอกสาร/อ่านย่อหน้า/hash + เวลาแต่ละขั้น
+ *   ไม่บันทึกเนื้อหานิยายหรือข้อมูลลับลง log (มีแต่ตัวเลขและชื่อ stage)
+ * - โหมด lightScan อ่านย่อหน้าครั้งเดียวต่อแท็บ (snapshot) แล้วให้ cleanup + ตัวตรวจ
+ *   ทุกกลุ่มใช้ข้อความชุดเดียวกัน แทนการไล่อ่านเอกสารซ้ำหลายรอบ
+ * - คงเกณฑ์การตรวจและการแก้เนื้อหาเบาเดิมทุกข้อ: — → ..., و → ล, เลขไทย → อารบิก,
+ *   ลบ : หลังเลขบท, ไม่จัดฟอร์แมต, ไม่ลบขยะท้ายบท/เติมจบตอน
+ * - การแก้ข้อความรักษาฟอร์แมต: ใช้ deleteText/insertText เฉพาะช่วง colon
+ *   และ Text.replaceText สำหรับ — / و / เลขไทย (ข้อความใหม่รับฟอร์แมตของข้อความเดิม)
+ * ========================================================= */
+
+const LIGHT_SCAN_VERSION_ = 'perf-1';
+
+var __LIGHT_SCAN_PERF__ = null;
+
+function lightScanPerfInit_(runId) {
+  __LIGHT_SCAN_PERF__ = {
+    runId: String(runId || ''),
+    version: LIGHT_SCAN_VERSION_,
+    counts: {},
+    stages: {}
+  };
+  return __LIGHT_SCAN_PERF__;
+}
+
+function lightScanPerfCount_(key, n) {
+  if (!__LIGHT_SCAN_PERF__) return;
+  __LIGHT_SCAN_PERF__.counts[key] = (__LIGHT_SCAN_PERF__.counts[key] || 0) + Number(n || 1);
+}
+
+function lightScanPerfMs_(key, ms) {
+  if (!__LIGHT_SCAN_PERF__) return;
+  __LIGHT_SCAN_PERF__.stages[key] = (__LIGHT_SCAN_PERF__.stages[key] || 0) + Math.max(0, Number(ms || 0));
+}
+
+function lightScanPerfTimed_(key, fn) {
+  var startedAt = Date.now();
+  try {
+    return fn();
+  } finally {
+    lightScanPerfMs_(key, Date.now() - startedAt);
+  }
+}
+
+function lightScanPerfSnapshot_() {
+  return __LIGHT_SCAN_PERF__ ? JSON.parse(JSON.stringify(__LIGHT_SCAN_PERF__)) : null;
+}
+
+/**
+ * คำนวณการแก้เนื้อหาเบาทั้ง 4 กฎจากข้อความย่อหน้า "ก่อนแก้" (pure function เทสได้)
+ * เกณฑ์ตรงตัวกับโค้ดเดิม: /—/ → '...' (replaceEmDashWithEllipsis), /و/ → 'ล',
+ * /[๐-๙]/ → อารบิก (convertThaiDigitsInBody_), colon หลังเลขบทเฉพาะหัวบท
+ * (findChapterTitleColonFix_) — ช่วงที่จับไม่ซ้อนกันเอง จึงคำนวณรวมบนข้อความชุดเดียวได้
+ */
+function computeLightScanParaEdits_(text, isHeadingPara) {
+  var s = String(text || '');
+  var edits = [];
+  var emDash = 0;
+  var waw = 0;
+  var thaiDigit = 0;
+  var m;
+
+  var re = /—/g;
+  while ((m = re.exec(s)) !== null) {
+    edits.push({ start: m.index, end: m.index + 1, replacement: '...' });
+    emDash++;
+  }
+
+  re = /و/g;
+  while ((m = re.exec(s)) !== null) {
+    edits.push({ start: m.index, end: m.index + 1, replacement: 'ล' });
+    waw++;
+  }
+
+  re = /[๐-๙]/g;
+  while ((m = re.exec(s)) !== null) {
+    edits.push({ start: m.index, end: m.index + 1, replacement: thaiDigitsToArabic_(m[0]) });
+    thaiDigit++;
+  }
+
+  var colonFix = null;
+  if (isHeadingPara) {
+    colonFix = findChapterTitleColonFix_(s);
+    if (colonFix) {
+      edits.push({ start: colonFix.start, end: colonFix.end, replacement: colonFix.insertSpace ? ' ' : '' });
+    }
+  }
+
+  edits.sort(function(a, b) { return b.start - a.start; });
+
+  return {
+    edits: edits,
+    counts: { emDash: emDash, waw: waw, thaiDigit: thaiDigit, colon: colonFix ? 1 : 0 },
+    colonFix: colonFix
+  };
+}
+
+/**
+ * แก้ย่อหน้าแบบรักษาฟอร์แมต:
+ * - colon ใช้ deleteText/insertText เฉพาะช่วงตำแหน่งที่คำนวณไว้ (ตำแหน่งจากข้อความก่อนแก้)
+ * - — / و / เลขไทย ใช้ Text.replaceText ซึ่งข้อความใหม่รับฟอร์แมตของข้อความเดิมที่ถูกแทน
+ * เรียง: colon ก่อน (positional) แล้ว pattern-based ที่เหลือ — ช่วงไม่ซ้อนกันจึงไม่ขัดกัน
+ */
+function applyLightScanParaEdits_(p, computed) {
+  var editor = p.editAsText();
+
+  if (computed.colonFix) {
+    editor.deleteText(computed.colonFix.start, computed.colonFix.end - 1);
+    if (computed.colonFix.insertSpace) editor.insertText(computed.colonFix.start, ' ');
+  }
+  if (computed.counts.emDash > 0) editor.replaceText('—', '...');
+  if (computed.counts.waw > 0) editor.replaceText('و', 'ล');
+  if (computed.counts.thaiDigit > 0) {
+    var pairs = [
+      ['๐', '0'], ['๑', '1'], ['๒', '2'], ['๓', '3'], ['๔', '4'],
+      ['๕', '5'], ['๖', '6'], ['๗', '7'], ['๘', '8'], ['๙', '9']
+    ];
+    pairs.forEach(function(pair) {
+      editor.replaceText(pair[0], pair[1]);
+    });
+  }
+}
+
+/**
+ * cleanup รวมต่อแท็บ: คำนวณจาก paraTexts ที่อ่านไว้แล้ว แล้วแก้เฉพาะย่อหน้าที่มีจุดแก้
+ * คืน counts + รายชื่อย่อหน้า dirty (ผู้เรียก re-read เฉพาะแถว dirty เพื่อให้
+ * การตรวจขั้นถัดไปเห็นข้อความล่าสุด — ไม่ใช้ cache เก่าข้ามการแก้ข้อความ)
+ */
+function applyLightScanCleanups_(paras, paraTexts) {
+  var totals = { emDash: 0, waw: 0, thaiDigit: 0, colon: 0 };
+  var dirtyIndexes = [];
+  var startedAt = Date.now();
+
+  for (var i = 0; i < paraTexts.length; i++) {
+    var isHeading = isChapterLineText_(normalizeChapterLine_(paraTexts[i]));
+    var computed = computeLightScanParaEdits_(paraTexts[i], isHeading);
+    if (!computed.edits.length) continue;
+
+    try {
+      applyLightScanParaEdits_(paras[i], computed);
+    } catch (e) {
+      continue;
+    }
+
+    totals.emDash += computed.counts.emDash;
+    totals.waw += computed.counts.waw;
+    totals.thaiDigit += computed.counts.thaiDigit;
+    totals.colon += computed.counts.colon;
+    dirtyIndexes.push(i);
+  }
+
+  lightScanPerfMs_('cleanup', Date.now() - startedAt);
+  lightScanPerfCount_('cleanupParas', dirtyIndexes.length);
+  return { counts: totals, dirtyIndexes: dirtyIndexes };
+}
+
+/** นับตัวอักษรต่างประเทศจากข้อความย่อหน้า (เกณฑ์เดียวกับเวอร์ชัน report-only เดิม) */
+function countForeignCharactersFromTexts_(texts) {
+  var count = 0;
+  var KOREAN_RE_SRC = '[\\u1100-\\u11FF\\u3130-\\u318F\\uAC00-\\uD7AF]+';
+
+  (texts || []).forEach(function(text) {
+    if (!text) return;
+
+    var koreanRe = new RegExp(KOREAN_RE_SRC, 'g');
+    var km;
+    while ((km = koreanRe.exec(text)) !== null) {
+      count += km[0].length;
+    }
+
+    var re = new RegExp(FOREIGN_WORD_RE_V9_.source, 'g');
+    var kaomojiSkipMap = buildKaomojiSkipMapV9_(text);
+
+    var match;
+    while ((match = re.exec(text)) !== null) {
+      var word = match[0];
+      var start = match.index;
+      var end = start + word.length - 1;
+
+      if (/[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF]/.test(word)) continue;
+      if (kaomojiSkipMap[start] || shouldSkipForeignWordV9_(word, text, start, end)) continue;
+
+      var allAllowed = true;
+      for (var i = 0; i < word.length; i++) {
+        if (!EXTRA_ALLOWED_CHARS_V9_.has(word[i])) {
+          allAllowed = false;
+          break;
+        }
+      }
+      if (allAllowed) continue;
+
+      count += word.length;
+    }
+  });
+
+  return count;
+}
+
+/** ตัวอย่างข้อความบทจาก texts (port ตรงจาก buildChapterNormalizedComparisonInput_) */
+function buildChapterNormalizedComparisonInputFromTexts_(paras, texts, headingIndex) {
+  var collected = '';
+  var limit = Math.min(texts.length, headingIndex + 30);
+
+  for (var j = headingIndex + 1; j < limit; j++) {
+    var raw = cleanText_(texts[j]);
+    if (!raw || raw === NOTE_TEXT_) continue;
+    if (isStatusPanelLine_(raw)) continue;
+    if (parseSourceEpisodeMarker_(raw, j + 1, null)) break;
+    if (isChapterLineText_(normalizeChapterLine_(raw))) break;
+
+    try {
+      if (collected.length === 0 &&
+          typeof isBoldUnderlineParagraph_ === 'function' &&
+          isBoldUnderlineParagraph_(paras[j])) continue;
+    } catch (e) {}
+
+    collected += raw + ' ';
+    if (collected.length >= 160) break;
+  }
+
+  return normalizeContentSignature_(collected);
+}
+
+/** ตัวอย่างยาว near-duplicate จาก texts (port ตรงจาก buildChapterNormalizedSimilarityInput_) */
+function buildChapterNormalizedSimilarityInputFromTexts_(paras, texts, headingIndex) {
+  var collected = '';
+  var limit = Math.min(texts.length, headingIndex + 50);
+
+  for (var j = headingIndex + 1; j < limit; j++) {
+    var raw = cleanText_(texts[j]);
+    if (!raw || raw === NOTE_TEXT_) continue;
+    if (isStatusPanelLine_(raw)) continue;
+    if (parseSourceEpisodeMarker_(raw, j + 1, null)) break;
+    if (isChapterLineText_(normalizeChapterLine_(raw))) break;
+
+    try {
+      if (collected.length === 0 &&
+          typeof isBoldUnderlineParagraph_ === 'function' &&
+          isBoldUnderlineParagraph_(paras[j])) continue;
+    } catch (e) {}
+
+    collected += raw + ' ';
+    if (collected.length >= 1600) break;
+  }
+
+  // normalize เดิมของ similarity input: lowercase + slice 1200 (ต่างจาก normalizeContentSignature_)
+  return String(collected || '')
+    .replace(INVIS_RE_, '')
+    .replace(/[\s\u00A0]+/g, '')
+    .replace(/[“”\"'‘’.,!?…\-–—()（）\[\]【】]/g, '')
+    .toLowerCase()
+    .slice(0, 1200);
+}
+
+/** ลายเซ็นเนื้อหาซ้ำ + near-duplicate จาก texts (port ตรงจาก collectChapterScanFromBody_) */
+function collectChapterScanFromTexts_(paras, texts) {
+  var chapters = [];
+  var sourceEpisodeMarkers = [];
+  var digestDocumentId = getCheckerContentDigestDocumentId_();
+  var currentChapterNumber = null;
+
+  for (var i = 0; i < texts.length; i++) {
+    var text = cleanText_(texts[i]);
+    if (!text || text === NOTE_TEXT_) continue;
+
+    var line = normalizeChapterLine_(text);
+    var sourceMarker = parseSourceEpisodeMarker_(line, i + 1, currentChapterNumber);
+    if (sourceMarker) {
+      sourceEpisodeMarkers.push(sourceMarker);
+      if (SOURCE_EPISODE_CONFIG_.IGNORE_FOR_SEQUENCE_CHECK !== false) continue;
+    }
+
+    if (!isChapterLineText_(line)) continue;
+
+    var num = extractChapterNumberFromText_(line);
+    if (num != null && !isNaN(num)) {
+      var similarity = chapters.length === 0
+        ? lightScanPerfTimed_('hashSimilarity', function() {
+            return computeCheckerContentSimilarityFingerprint_(
+              digestDocumentId,
+              buildChapterNormalizedSimilarityInputFromTexts_(paras, texts, i)
+            );
+          })
+        : { hash: '', length: 0 };
+      if (chapters.length === 0) lightScanPerfCount_('hashCount');
+
+      var digest = lightScanPerfTimed_('hashDigest', function() {
+        return computeCheckerContentDigest_(
+          digestDocumentId,
+          buildChapterNormalizedComparisonInputFromTexts_(paras, texts, i)
+        );
+      });
+      lightScanPerfCount_('hashCount');
+
+      chapters.push({
+        paragraphIndex: i + 1,
+        text: text,
+        chapterNumber: num,
+        contentDigest: digest,
+        contentSimilarityHash: similarity.hash,
+        contentSimilarityLength: similarity.length
+      });
+      currentChapterNumber = num;
+    }
+  }
+
+  return {
+    chapters: chapters,
+    sourceEpisodeMarkers: sourceEpisodeMarkers
+  };
+}
+
+/** ลำดับบทภายในแท็บจาก chapters (loop เดียวกับ checkChapterSequenceInBody_) */
+function checkChapterSequenceFromChapters_(chapters) {
+  var issues = [];
+
+  for (var i = 1; i < chapters.length; i++) {
+    var prev = chapters[i - 1];
+    var curr = chapters[i];
+    var expected = prev.chapterNumber + 1;
+
+    if (curr.chapterNumber !== expected) {
+      var type = 'ไม่ต่อเนื่อง';
+      if (curr.chapterNumber === prev.chapterNumber) type = 'เลขซ้ำ';
+      else if (curr.chapterNumber < prev.chapterNumber) type = 'เลขย้อนหลัง';
+      else if (curr.chapterNumber > expected) type = 'เลขข้าม';
+
+      issues.push({
+        type: type,
+        expected: expected,
+        previous: prev.chapterNumber,
+        current: curr.chapterNumber,
+        paragraphIndex: curr.paragraphIndex,
+        text: curr.text
+      });
+    }
+  }
+
+  return {
+    ok: issues.length === 0,
+    totalFound: chapters.length,
+    chapters: chapters,
+    issues: issues
+  };
+}
+
+/** ประโยคอังกฤษยาวจากข้อความย่อหน้า (port ตรงจาก checkerScanLongEnglishParagraphsInActiveBody_) */
+function checkerScanLongEnglishFromTexts_(texts) {
+  var cfg = CHECKER_CFG || {};
+  if (cfg.LONG_ENGLISH_CHECK_ENABLED === false) return { paragraphCount: 0 };
+
+  var paragraphCount = 0;
+  (texts || []).forEach(function(text) {
+    var t = cleanText_(text);
+    if (!t || t === NOTE_TEXT_) return;
+    if (checkerHasLongEnglishSentence_(t)) paragraphCount++;
+  });
+
+  return { paragraphCount: paragraphCount };
+}
+
+/** ตรวจท้ายบท report-only จากข้อความย่อหน้า (port ตรงจาก detectEndingPromoReportOnly_) */
+function detectEndingPromoFromTexts_(texts) {
+  var cfg = (typeof ENDING_CLEANUP_CONFIG_ !== 'undefined') ? ENDING_CLEANUP_CONFIG_ : null;
+  var empty = {
+    changed: false,
+    removedPromoLines: 0,
+    removedPromoExamples: [],
+    pendingPromoLines: 0,
+    hadEndMarker: true,
+    insertedEndMarker: false,
+    dedupedEndMarker: 0,
+    scannedTailParagraphs: 0
+  };
+  if (!cfg || cfg.ENABLED === false) return empty;
+
+  var total = (texts || []).length;
+  var scanLimit = Math.max(1, Number(cfg.TAIL_PARAGRAPH_SCAN_LIMIT || 15));
+  var startIdx = Math.max(0, total - scanLimit);
+  var pendingPromoLines = 0;
+  var hadEndMarker = false;
+
+  for (var i = startIdx; i < total; i++) {
+    var text = cleanText_(texts[i]);
+    if (!text || text === NOTE_TEXT_) continue;
+    if (typeof isStatusPanelLine_ === 'function' && isStatusPanelLine_(text)) continue;
+
+    if (typeof isEndMarkerLine_ === 'function' && isEndMarkerLine_(text, cfg)) {
+      hadEndMarker = true;
+    } else if (typeof isRemovableEndingPromoLine_ === 'function' && isRemovableEndingPromoLine_(text)) {
+      pendingPromoLines++;
+    }
+  }
+
+  return {
+    changed: false,
+    removedPromoLines: 0,
+    removedPromoExamples: [],
+    pendingPromoLines: pendingPromoLines,
+    hadEndMarker: hadEndMarker,
+    insertedEndMarker: false,
+    dedupedEndMarker: 0,
+    scannedTailParagraphs: total - startIdx
+  };
+}
+
+/** ขยะท้ายบทจากข้อความย่อหน้า (port ตรงจาก scanTabTailJunkGroups_) */
+function scanTabTailJunkFromTexts_(texts) {
+  var groups = [];
+  var limit = Number(TAIL_JUNK_SCAN_CFG_.TAIL_PARAGRAPHS || 10);
+  var startIdx = Math.max(0, (texts || []).length - limit);
+
+  for (var i = startIdx; i < (texts || []).length; i++) {
+    if (!String(texts[i] || '').trim()) continue;
+    var group = classifyTailJunkLine_(texts[i]);
+    if (group && groups.indexOf(group) === -1) groups.push(group);
+  }
+
+  return groups;
+}
+
+/** ต้นฉบับอังกฤษ report-only จากข้อความย่อหน้า (ตัวตรวจเดิม detectEnglishSourceBlock_ รับ texts อยู่แล้ว) */
+function detectEnglishSourceFromTexts_(texts) {
+  var cfg = (typeof ENGLISH_SOURCE_CLEANUP_CONFIG_ !== 'undefined') ? ENGLISH_SOURCE_CLEANUP_CONFIG_ : null;
+  var emptyReport = {
+    detected: 0,
+    removed: 0,
+    removedParagraphs: 0,
+    englishHeading: '',
+    thaiHeading: '',
+    startParagraphIndex: null,
+    endParagraphIndex: null,
+    confidence: null,
+    examples: []
+  };
+  if (!cfg || cfg.ENABLED === false) return emptyReport;
+  if (typeof detectEnglishSourceBlock_ !== 'function') return emptyReport;
+
+  var blockInfo = detectEnglishSourceBlock_(texts || [], cfg);
+  if (!blockInfo.detected) return emptyReport;
+
+  return {
+    detected: 1,
+    removed: 0,
+    removedParagraphs: 0,
+    englishHeading: blockInfo.englishHeadingText,
+    thaiHeading: blockInfo.thaiHeadingText,
+    startParagraphIndex: blockInfo.startIndex + 1,
+    endParagraphIndex: blockInfo.endIndex + 1,
+    confidence: blockInfo.confidence,
+    examples: blockInfo.confidence === 'HIGH' ? [] : blockInfo.examples
+  };
+}
+
+/** แท็บยังไม่แปลจากข้อความรวมของแท็บ (เกณฑ์เดียวกับ computeUntranslatedEnglishInfoForActiveTab_) */
+function computeUntranslatedEnglishFromTexts_(joinedText) {
+  if (!CHECKER_CFG || CHECKER_CFG.ENGLISH_UNTRANSLATED_CHECK_ENABLED === false) return null;
+  if (!checkerIsLikelyUntranslatedEnglishText_(joinedText)) return null;
+  var analysis = checkerAnalyzeThaiEnglishRatio_(joinedText);
+  return { latinRatio: analysis.latinRatio, thaiRatio: analysis.thaiRatio };
 }
