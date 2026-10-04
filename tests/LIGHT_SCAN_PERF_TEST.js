@@ -122,12 +122,13 @@ function findChapterTitleColonFix_(raw) {
   };
 }
 
-function computeLightScanParaEdits_(text, isHeadingPara) {
+function computeLightScanParaEdits_(text, isHeadingPara, isPrimaryHeading) {
   var s = String(text || '');
   var edits = [];
   var emDash = 0;
   var waw = 0;
   var thaiDigit = 0;
+  var tonToBod = 0;
   var m;
 
   var re = /—/g;
@@ -145,12 +146,20 @@ function computeLightScanParaEdits_(text, isHeadingPara) {
     if (colonFix) edits.push({ start: colonFix.start, end: colonFix.end, replacement: colonFix.insertSpace ? ' ' : '' });
   }
 
+  var tonToBodEdit = null;
+  if (isPrimaryHeading && /^ตอนที่(?=\s*[0-9๐-๙])/.test(s)) {
+    tonToBodEdit = { start: 0, end: 6, replacement: 'บทที่' };
+    edits.push(tonToBodEdit);
+    tonToBod = 1;
+  }
+
   edits.sort(function(a, b) { return b.start - a.start; });
 
   return {
     edits: edits,
-    counts: { emDash: emDash, waw: waw, thaiDigit: thaiDigit, colon: colonFix ? 1 : 0 },
-    colonFix: colonFix
+    counts: { emDash: emDash, waw: waw, thaiDigit: thaiDigit, colon: colonFix ? 1 : 0, tonToBod: tonToBod },
+    colonFix: colonFix,
+    tonToBodEdit: tonToBodEdit
   };
 }
 
@@ -163,10 +172,10 @@ function applyEditsSim_(text, edits) {
   return s;
 }
 
-// พฤติกรรม "เดิม": ทำทีละ pass บนข้อความผลลัพธ์ล่าสุดเสมอ
-function oldSequentialSim_(text, isHeading) {
+// พฤติกรรม "เดิม": ทำทีละ pass บนข้อความผลลัพธ์ล่าสุดเสมอ (รวมกฎ ตอนที่→บทที่ ชุดเดียวกัน)
+function oldSequentialSim_(text, isHeading, isPrimaryHeading) {
   var s = String(text || '');
-  var counts = { emDash: 0, waw: 0, thaiDigit: 0, colon: 0 };
+  var counts = { emDash: 0, waw: 0, thaiDigit: 0, colon: 0, tonToBod: 0 };
 
   counts.emDash = (s.match(/—/g) || []).length;
   s = s.replace(/—/g, '...');
@@ -179,14 +188,19 @@ function oldSequentialSim_(text, isHeading) {
     s = s.slice(0, fix.start) + (fix.insertSpace ? ' ' : '') + s.slice(fix.end);
   }
 
+  if (isPrimaryHeading && /^ตอนที่(?=\s*[0-9๐-๙])/.test(s)) {
+    counts.tonToBod = 1;
+    s = 'บทที่' + s.slice(6);
+  }
+
   counts.thaiDigit = (s.match(/[๐-๙]/g) || []).length;
   s = s.replace(/[๐-๙]/g, function(ch) { return thaiDigitsToArabic_(ch); });
 
   return { text: s, counts: counts };
 }
 
-function newCombinedSim_(text, isHeading) {
-  var computed = computeLightScanParaEdits_(text, isHeading);
+function newCombinedSim_(text, isHeading, isPrimaryHeading) {
+  var computed = computeLightScanParaEdits_(text, isHeading, isPrimaryHeading);
   return { text: applyEditsSim_(text, computed.edits), counts: computed.counts };
 }
 
@@ -346,18 +360,37 @@ const parityCases = [
 let parityChecked = 0;
 parityCases.forEach(function(text) {
   [true, false].forEach(function(isHeading) {
-    var oldRes = oldSequentialSim_(text, isHeading);
-    var newRes = newCombinedSim_(text, isHeading);
-    parityChecked++;
-    expectEqual(
-      'ข้อความสุดท้ายตรงกัน [' + text + '|' + isHeading + ']',
-      newRes.text, oldRes.text
-    );
-    expectEqual(
-      'จำนวนจุดแก้ตรงกัน [' + text + '|' + isHeading + ']',
-      JSON.stringify(newRes.counts), JSON.stringify(oldRes.counts)
-    );
+    [true, false].forEach(function(isPrimary) {
+      var oldRes = oldSequentialSim_(text, isHeading, isPrimary);
+      var newRes = newCombinedSim_(text, isHeading, isPrimary);
+      parityChecked++;
+      expectEqual(
+        'ข้อความสุดท้ายตรงกัน [' + text + '|H:' + isHeading + '|P:' + isPrimary + ']',
+        newRes.text, oldRes.text
+      );
+      expectEqual(
+        'จำนวนจุดแก้ตรงกัน [' + text + '|H:' + isHeading + '|P:' + isPrimary + ']',
+        JSON.stringify(newRes.counts), JSON.stringify(oldRes.counts)
+      );
+    });
   });
+});
+
+console.log("\n=== ตอนที่ → บทที่ (เฉพาะหัวบทหลักแรกของแท็บ) ===\n");
+
+const tonCases = [
+  { text: 'ตอนที่ 130: เป็นเทพของเธอ?', isH: true, isP: true, expected: 'บทที่ 130 เป็นเทพของเธอ?' },
+  { text: 'ตอนที่ ๑๒๓ ชื่อไทย', isH: true, isP: true, expected: 'บทที่ 123 ชื่อไทย' },
+  { text: 'ตอนที่ 45', isH: true, isP: true, expected: 'บทที่ 45' },
+  { text: 'ตอนที่ 130: เป็นเทพของเธอ?', isH: true, isP: false, expected: 'ตอนที่ 130 เป็นเทพของเธอ?' },
+  { text: 'ตอนที่ฉันยังเด็ก ๆ', isH: false, isP: false, expected: 'ตอนที่ฉันยังเด็ก ๆ' },
+  { text: 'บทที่ 12: แล้วพบกัน', isH: true, isP: true, expected: 'บทที่ 12 แล้วพบกัน' }
+];
+
+tonCases.forEach(function(c) {
+  var res = newCombinedSim_(c.text, c.isH, c.isP);
+  expectEqual(c.text + ' (H=' + c.isH + ', P=' + c.isP + ')', res.text, c.expected);
+  expectEqual(c.text + ' (นับ tonToBod)', res.counts.tonToBod, /ตอนที่(?=\s*[0-9๐-๙])/.test(c.text) && c.isP && c.isH ? 1 : 0);
 });
 
 console.log("\n=== ตัวอย่างผลรวม (สำหรับตรวจสายตา) ===\n");
@@ -417,6 +450,6 @@ expectEqual('N รายงานขยะท้ายบทแยกกลุ�
   otherNotes.noteOther.indexOf('ขยะท้ายบท คอมเมนต์/โหวต: แท็บ 11') !== -1, true);
 
 console.log("\n=========================");
-console.log('parity cases: ' + parityChecked + ' ตัวอย่าง x 2 การตรวจ');
+console.log('parity cases: ' + parityChecked + ' ตัวอย่าง x 4 การตรวจ');
 console.log(failed === 0 ? "✅ ผ่านทุกเคส" : "❌ ไม่ผ่าน " + failed + " เคส");
 process.exitCode = failed === 0 ? 0 : 1;

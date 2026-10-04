@@ -475,6 +475,7 @@ function summarizeBatchTotals_(totals) {
     endingMissingMarkerTabs: totals.endingMissingMarkerTabs || [],
     titleColonFixed: Number(totals.titleColonFixed || 0),
     thaiDigitFixed: Number(totals.thaiDigitFixed || 0),
+    episodePrefixFixed: Number(totals.episodePrefixFixed || 0),
     untranslatedChecked: Number(totals.untranslatedChecked || 0)
   });
 }
@@ -581,6 +582,7 @@ function mergeBatchTotals_(base, add) {
 
   base.titleColonFixed = Number(base.titleColonFixed || 0) + Number(add.titleColonFixed || 0);
   base.thaiDigitFixed = Number(base.thaiDigitFixed || 0) + Number(add.thaiDigitFixed || 0);
+  base.episodePrefixFixed = Number(base.episodePrefixFixed || 0) + Number(add.episodePrefixFixed || 0);
   base.untranslatedChecked = Number(base.untranslatedChecked || 0) + Number(add.untranslatedChecked || 0);
 
   return base;
@@ -2966,6 +2968,7 @@ function runAllChecksLightScan_() {
     nonThaiCount: nonThaiCount,
     titleColonFixed: cleanup.counts.colon,
     thaiDigitFixed: cleanup.counts.thaiDigit,
+    episodePrefixFixed: cleanup.counts.tonToBod,
     sourceNoChapterNote: sourceNoChapterNote,
     englishSourceCleanup: englishSourceCleanup,
     endingCleanup: endingCleanup,
@@ -3009,6 +3012,7 @@ function accumulateLightScanTabExtras_(batchTotals, result, tabIndex) {
 
   batchTotals.titleColonFixed = Number(batchTotals.titleColonFixed || 0) + Number(result.titleColonFixed || 0);
   batchTotals.thaiDigitFixed = Number(batchTotals.thaiDigitFixed || 0) + Number(result.thaiDigitFixed || 0);
+  batchTotals.episodePrefixFixed = Number(batchTotals.episodePrefixFixed || 0) + Number(result.episodePrefixFixed || 0);
 }
 
 function writeLightScanColumnValue_(sheetRow, column, value) {
@@ -3167,6 +3171,9 @@ function buildLightScanColumnNotes_(summary, doc) {
   if (Number(summary.titleColonFixed || 0) > 0) {
     fixStats.push('ลบ : ในชื่อบท ' + Number(summary.titleColonFixed) + ' จุด');
   }
+  if (Number(summary.episodePrefixFixed || 0) > 0) {
+    fixStats.push('แก้ ตอนที่ เป็น บทที่ ' + Number(summary.episodePrefixFixed) + ' จุด');
+  }
   if (Number(summary.thaiDigitFixed || 0) > 0) {
     fixStats.push('แปลงเลขไทยเป็นอารบิก ' + Number(summary.thaiDigitFixed) + ' ตัว');
   }
@@ -3205,7 +3212,7 @@ function buildLightScanColumnNotes_(summary, doc) {
  *   และ Text.replaceText สำหรับ — / و / เลขไทย (ข้อความใหม่รับฟอร์แมตของข้อความเดิม)
  * ========================================================= */
 
-const LIGHT_SCAN_VERSION_ = 'perf-1';
+const LIGHT_SCAN_VERSION_ = 'perf-2';
 
 var __LIGHT_SCAN_PERF__ = null;
 
@@ -3243,17 +3250,20 @@ function lightScanPerfSnapshot_() {
 }
 
 /**
- * คำนวณการแก้เนื้อหาเบาทั้ง 4 กฎจากข้อความย่อหน้า "ก่อนแก้" (pure function เทสได้)
+ * คำนวณการแก้เนื้อหาเบาทั้ง 5 กฎจากข้อความย่อหน้า "ก่อนแก้" (pure function เทสได้)
  * เกณฑ์ตรงตัวกับโค้ดเดิม: /—/ → '...' (replaceEmDashWithEllipsis), /و/ → 'ล',
  * /[๐-๙]/ → อารบิก (convertThaiDigitsInBody_), colon หลังเลขบทเฉพาะหัวบท
- * (findChapterTitleColonFix_) — ช่วงที่จับไม่ซ้อนกันเอง จึงคำนวณรวมบนข้อความชุดเดียวได้
+ * (findChapterTitleColonFix_), และ "ตอนที่" → "บทที่" เฉพาะหัวบทหลักแรกของแท็บ
+ * (ตามแบบ titleConvertAndReport_ เดิม; ไม่แตะ marker ต้นฉบับกลางแท็บ)
+ * — ช่วงที่จับไม่ซ้อนกันเอง จึงคำนวณรวมบนข้อความชุดเดียวได้
  */
-function computeLightScanParaEdits_(text, isHeadingPara) {
+function computeLightScanParaEdits_(text, isHeadingPara, isPrimaryHeading) {
   var s = String(text || '');
   var edits = [];
   var emDash = 0;
   var waw = 0;
   var thaiDigit = 0;
+  var tonToBod = 0;
   var m;
 
   var re = /—/g;
@@ -3282,12 +3292,20 @@ function computeLightScanParaEdits_(text, isHeadingPara) {
     }
   }
 
+  var tonToBodEdit = null;
+  if (isPrimaryHeading && /^ตอนที่(?=\s*[0-9๐-๙])/.test(s)) {
+    tonToBodEdit = { start: 0, end: 6, replacement: 'บทที่' };
+    edits.push(tonToBodEdit);
+    tonToBod = 1;
+  }
+
   edits.sort(function(a, b) { return b.start - a.start; });
 
   return {
     edits: edits,
-    counts: { emDash: emDash, waw: waw, thaiDigit: thaiDigit, colon: colonFix ? 1 : 0 },
-    colonFix: colonFix
+    counts: { emDash: emDash, waw: waw, thaiDigit: thaiDigit, colon: colonFix ? 1 : 0, tonToBod: tonToBod },
+    colonFix: colonFix,
+    tonToBodEdit: tonToBodEdit
   };
 }
 
@@ -3300,9 +3318,14 @@ function computeLightScanParaEdits_(text, isHeadingPara) {
 function applyLightScanParaEdits_(p, computed) {
   var editor = p.editAsText();
 
+  // positional edits จากข้อความก่อนแก้: ทำตำแหน่งท้ายก่อนหน้า (colon) แล้วค่อยต้นย่อหน้า (ตอนที่→บทที่)
   if (computed.colonFix) {
     editor.deleteText(computed.colonFix.start, computed.colonFix.end - 1);
     if (computed.colonFix.insertSpace) editor.insertText(computed.colonFix.start, ' ');
+  }
+  if (computed.tonToBodEdit) {
+    editor.deleteText(computed.tonToBodEdit.start, computed.tonToBodEdit.end - 1);
+    editor.insertText(computed.tonToBodEdit.start, computed.tonToBodEdit.replacement);
   }
   if (computed.counts.emDash > 0) editor.replaceText('—', '...');
   if (computed.counts.waw > 0) editor.replaceText('و', 'ล');
@@ -3323,13 +3346,18 @@ function applyLightScanParaEdits_(p, computed) {
  * การตรวจขั้นถัดไปเห็นข้อความล่าสุด — ไม่ใช้ cache เก่าข้ามการแก้ข้อความ)
  */
 function applyLightScanCleanups_(paras, paraTexts) {
-  var totals = { emDash: 0, waw: 0, thaiDigit: 0, colon: 0 };
+  var totals = { emDash: 0, waw: 0, thaiDigit: 0, colon: 0, tonToBod: 0 };
   var dirtyIndexes = [];
+  var firstHeadingSeen = false;
   var startedAt = Date.now();
 
   for (var i = 0; i < paraTexts.length; i++) {
     var isHeading = isChapterLineText_(normalizeChapterLine_(paraTexts[i]));
-    var computed = computeLightScanParaEdits_(paraTexts[i], isHeading);
+    // "ตอนที่" → "บทที่" เฉพาะหัวบทแรกของแท็บ กันไปแตะหัวตอนต้นฉบับ (source episode marker) กลางแท็บ
+    var isPrimaryHeading = isHeading && !firstHeadingSeen;
+    if (isHeading) firstHeadingSeen = true;
+
+    var computed = computeLightScanParaEdits_(paraTexts[i], isHeading, isPrimaryHeading);
     if (!computed.edits.length) continue;
 
     try {
@@ -3342,6 +3370,7 @@ function applyLightScanCleanups_(paras, paraTexts) {
     totals.waw += computed.counts.waw;
     totals.thaiDigit += computed.counts.thaiDigit;
     totals.colon += computed.counts.colon;
+    totals.tonToBod += computed.counts.tonToBod;
     dirtyIndexes.push(i);
   }
 
