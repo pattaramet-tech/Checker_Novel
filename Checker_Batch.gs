@@ -3184,10 +3184,7 @@ function buildLightScanColumnNotes_(summary, doc) {
   if (pendingPromoTabs.length) {
     other.push('พบบรรทัดโปรโมตท้ายบท: แท็บ ' + formatTabNumberList_(pendingPromoTabs));
   }
-  var missingMarkerTabs = summary.endingMissingMarkerTabs || [];
-  if (missingMarkerTabs.length) {
-    other.push('ไม่พบ "จบตอน" ท้ายแท็บ: แท็บ ' + formatTabNumberList_(missingMarkerTabs));
-  }
+  // ไม่รายงาน "ไม่พบ จบตอน ท้ายแท็บ" ตามที่ผู้ใช้ขอ (ข้อมูลยังสะสมใน endingMissingMarkerTabs แต่ไม่แสดง)
 
   var engSourceTabs = (summary.englishSourceUncertainTabs || [])
     .map(function(x) { return Number(x.tabIndex || 0); })
@@ -3245,7 +3242,7 @@ function buildLightScanColumnNotes_(summary, doc) {
  *   และ Text.replaceText สำหรับ — / و / เลขไทย (ข้อความใหม่รับฟอร์แมตของข้อความเดิม)
  * ========================================================= */
 
-const LIGHT_SCAN_VERSION_ = 'perf-3';
+const LIGHT_SCAN_VERSION_ = 'perf-4';
 
 var __LIGHT_SCAN_PERF__ = null;
 

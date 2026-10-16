@@ -363,8 +363,7 @@ function buildLightScanColumnNotes_(summary, doc) {
 
   var pendingPromoTabs = summary.endingPendingPromoTabs || [];
   if (pendingPromoTabs.length) other.push('พบบรรทัดโปรโมตท้ายบท: แท็บ ' + formatTabNumberList_(pendingPromoTabs));
-  var missingMarkerTabs = summary.endingMissingMarkerTabs || [];
-  if (missingMarkerTabs.length) other.push('ไม่พบ "จบตอน" ท้ายแท็บ: แท็บ ' + formatTabNumberList_(missingMarkerTabs));
+  // ไม่รายงาน "ไม่พบ จบตอน ท้ายแท็บ" ตามที่ผู้ใช้ขอ (ข้อมูลยังสะสมใน endingMissingMarkerTabs แต่ไม่แสดง)
 
   var engSourceTabs = (summary.englishSourceUncertainTabs || [])
     .map(function(x) { return Number(x.tabIndex || 0); })
