@@ -470,6 +470,7 @@ function summarizeBatchTotals_(totals) {
     untranslatedEnglishTabs: totals.untranslatedEnglishTabs || [],
     emptyTabNumbers: totals.emptyTabNumbers || [],
     announcementTabNumbers: totals.announcementTabNumbers || [],
+    sourceNoteTabNumbers: totals.sourceNoteTabNumbers || [],
     tailJunkTabGroups: totals.tailJunkTabGroups || [],
     endingPendingPromoTabs: totals.endingPendingPromoTabs || [],
     endingMissingMarkerTabs: totals.endingMissingMarkerTabs || [],
@@ -563,7 +564,7 @@ function mergeBatchTotals_(base, add) {
     if (!exists) base.tabChapterItems.push(item);
   });
 
-  ['emptyTabNumbers', 'announcementTabNumbers', 'endingPendingPromoTabs', 'endingMissingMarkerTabs'].forEach(function(key) {
+  ['emptyTabNumbers', 'announcementTabNumbers', 'sourceNoteTabNumbers', 'endingPendingPromoTabs', 'endingMissingMarkerTabs'].forEach(function(key) {
     base[key] = base[key] || [];
     (add[key] || []).forEach(function(n) {
       var v = Number(n);
@@ -2229,9 +2230,9 @@ const EMPTY_TAB_SCAN_CONFIG_ = {
   // นับเฉพาะย่อหน้าเนื้อหาจริง ไม่นับบรรทัดว่าง/หัวบท/บรรทัดประกาศ/จบตอน
   ANNOUNCEMENT_MIN_PARAGRAPHS: 8,
 
-  // แท็บที่มีแค่หัวบท "หมายเหตุจากต้นฉบับ" (ตรงกับทุก pattern ในหัวบททุกบรรทัด)
-  // ไม่นับเป็นแท็บว่าง — ไม่บันทึกหมายเหตุคอลัมน์ L แยก
-  SOURCE_NOTE_TAB_RE_: [/หมายเหตุ/, /ต้นฉบับ/]
+  // แท็บที่มีแค่หัวบท "หมายเหตุจากต้นฉบับ/ต่างประเทศ" (ตรงกับทุก pattern ในหัวบททุกบรรทัด)
+  // ไม่นับเป็นแท็บว่าง — และไม่นับเข้าจำนวนบทสำหรับราคาในคอลัมน์ L (เสร็จ N)
+  SOURCE_NOTE_TAB_RE_: [/หมายเหตุ/, /(?:ต้นฉบับ|ต่างประเทศ)/]
 };
 
 /** บรรทัดนี้เป็นบรรทัดประกาศ/โปรโมต (ไม่ใช่เนื้อเรื่อง) หรือไม่ */
@@ -2990,6 +2991,10 @@ function accumulateLightScanTabExtras_(batchTotals, result, tabIndex) {
   if (checkerShouldFlagEmptyTab_(info)) {
     batchTotals.emptyTabNumbers = batchTotals.emptyTabNumbers || [];
     if (batchTotals.emptyTabNumbers.indexOf(tabIndex) === -1) batchTotals.emptyTabNumbers.push(tabIndex);
+  } else if (info.isSourceNoteTab) {
+    // แท็บหมายเหตุจากต้นฉบับ/ต่างประเทศ: เก็บรายชื่อไว้หักออกจากจำนวนบทในคอลัมน์ L (เสร็จ N)
+    batchTotals.sourceNoteTabNumbers = batchTotals.sourceNoteTabNumbers || [];
+    if (batchTotals.sourceNoteTabNumbers.indexOf(tabIndex) === -1) batchTotals.sourceNoteTabNumbers.push(tabIndex);
   } else if (!info.isSourceNoteTab && info.meaningfulParagraphCount < Number(EMPTY_TAB_SCAN_CONFIG_.ANNOUNCEMENT_MIN_PARAGRAPHS)) {
     batchTotals.announcementTabNumbers = batchTotals.announcementTabNumbers || [];
     if (batchTotals.announcementTabNumbers.indexOf(tabIndex) === -1) batchTotals.announcementTabNumbers.push(tabIndex);
@@ -3013,6 +3018,24 @@ function accumulateLightScanTabExtras_(batchTotals, result, tabIndex) {
   batchTotals.titleColonFixed = Number(batchTotals.titleColonFixed || 0) + Number(result.titleColonFixed || 0);
   batchTotals.thaiDigitFixed = Number(batchTotals.thaiDigitFixed || 0) + Number(result.thaiDigitFixed || 0);
   batchTotals.episodePrefixFixed = Number(batchTotals.episodePrefixFixed || 0) + Number(result.episodePrefixFixed || 0);
+}
+
+/**
+ * ฟรี ตามชื่อไฟล์: ขึ้นต้นด้วย 001/1 (เช่น "001 เรื่องอะไรก็ได้")
+ * หรือมีช่วงเลขเริ่มที่ 1 ท้ายชื่อ (เช่น "... 001 - 050") ตามกฎเดิม isFreeChapterRangeDocument_
+ * Export IpeNovel จะอ่านคำว่า ฟรี จากคอลัมน์ L แล้วตั้งราคา 0
+ */
+function isFreeDocumentByName_(doc) {
+  try {
+    if (doc && typeof isFreeChapterRangeDocument_ === 'function' && isFreeChapterRangeDocument_(doc)) return true;
+    var name = thaiDigitsToArabic_(String(doc && doc.getName ? doc.getName() : ''))
+      .replace(INVIS_RE_, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return /^0*1(?:[^0-9]|$)/.test(name);
+  } catch (e) {
+    return false;
+  }
 }
 
 function writeLightScanColumnValue_(sheetRow, column, value) {
@@ -3044,6 +3067,11 @@ function buildLightScanColumnNotes_(summary, doc) {
 
   // ===== L: ภาษา =====
   var lang = [];
+  // จำนวนบทสำหรับ Export IpeNovel (sheetNotePerChapter): ทุกแท็บในไฟล์ หักแท็บหมายเหตุจากต้นฉบับ/ต่างประเทศ
+  // ใส่รูปแบบ "เสร็จ N" ไว้หัวโน้ต เพราะ ipnPkgRowParseChapterCountAndFreeFromNote_ อ่านเสร็จ N ก่อนเลขอื่น
+  var sourceNoteTabList = summary.sourceNoteTabNumbers || [];
+  var countedTabs = Math.max(0, Number(summary.tabTotal || 0) - sourceNoteTabList.length);
+  lang.push('เสร็จ ' + countedTabs);
   var coverage = summary.untranslatedCoverage || null;
   var coverageIncomplete = !!coverage && coverage.complete === false;
   var nonThai = Number(summary.nonThaiCount || 0);
@@ -3132,6 +3160,10 @@ function buildLightScanColumnNotes_(summary, doc) {
     other.push('ตรวจ ' + Number(summary.tabTotal || 0) + ' แท็บ ทุกแท็บมีเนื้อหา');
   }
 
+  if (sourceNoteTabList.length) {
+    other.push('ยกเว้นแท็บหมายเหตุ (' + sourceNoteTabList.length + ' แท็บ ไม่นับเข้าเสร็จ ' + countedTabs + '): แท็บ ' + formatTabNumberList_(sourceNoteTabList));
+  }
+
   var junkByGroup = {};
   var junkOrder = [];
   (summary.tailJunkTabGroups || []).forEach(function(item) {
@@ -3188,8 +3220,9 @@ function buildLightScanColumnNotes_(summary, doc) {
   var noteOther = dedupeCheckerNotes_(other.join(' | '));
 
   // marker ฟรี ต้องอยู่คอลัมน์ L เสมอ (ระบบ export อ่าน ฟรี/จำนวนบท จาก L)
-  if (doc && typeof isFreeChapterRangeDocument_ === 'function') {
-    noteLanguage = addCheckerFreeMarker_(noteLanguage, isFreeChapterRangeDocument_(doc));
+  // ฟรีเมื่อชื่อไฟล์ขึ้นต้นด้วย 001/1 หรือมีช่วงเลขเริ่มที่ 1 (เช่น "... 001 - 050") ตามกฎเดิม
+  if (doc && typeof isFreeDocumentByName_ === 'function') {
+    noteLanguage = addCheckerFreeMarker_(noteLanguage, isFreeDocumentByName_(doc));
   }
 
   return {
@@ -3212,7 +3245,7 @@ function buildLightScanColumnNotes_(summary, doc) {
  *   และ Text.replaceText สำหรับ — / و / เลขไทย (ข้อความใหม่รับฟอร์แมตของข้อความเดิม)
  * ========================================================= */
 
-const LIGHT_SCAN_VERSION_ = 'perf-2';
+const LIGHT_SCAN_VERSION_ = 'perf-3';
 
 var __LIGHT_SCAN_PERF__ = null;
 

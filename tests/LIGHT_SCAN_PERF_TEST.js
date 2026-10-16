@@ -39,7 +39,7 @@ const EMPTY_TAB_SCAN_CONFIG_ = {
     /โปรดติดตาม|ฝากติดตาม|ติดตามต่อไป/
   ],
   ANNOUNCEMENT_MIN_PARAGRAPHS: 8,
-  SOURCE_NOTE_TAB_RE_: [/หมายเหตุ/, /ต้นฉบับ/]
+  SOURCE_NOTE_TAB_RE_: [/หมายเหตุ/, /(?:ต้นฉบับ|ต่างประเทศ)/]
 };
 
 function formatTabNumberList_(tabIndexes) {
@@ -204,11 +204,72 @@ function newCombinedSim_(text, isHeading, isPrimaryHeading) {
   return { text: applyEditsSim_(text, computed.edits), counts: computed.counts };
 }
 
-// ===== buildLightScanColumnNotes_ (สำเนาตรงจาก Checker_Batch perf-1) =====
+// ===== Free marker stubs (จาก Checker_Batch) =====
+function stripCheckerFreeMarker_(note) {
+  return String(note || '').split('|').map(function(part) {
+    var cleanPart = part.trim();
+    while (/(?:^|\s)ฟรี\s*$/.test(cleanPart)) {
+      cleanPart = cleanPart.replace(/(?:^|\s)ฟรี\s*$/, '').trim();
+    }
+    return cleanPart;
+  }).filter(Boolean).join(' | ');
+}
+
+function addCheckerFreeMarker_(note, isFree) {
+  var original = String(note || '').trim();
+  if (!isFree) return original;
+  var cleanNote = stripCheckerFreeMarker_(original);
+  var parts = cleanNote ? cleanNote.split('|').map(function(part) { return part.trim(); }).filter(Boolean) : [];
+  var primaryIndex = -1;
+  for (var i = 0; i < parts.length; i++) {
+    if (/^(?:เลขบทเรียงต่อเนื่อง|รอ\s+[0-9]+\s+แท็บ)$/.test(parts[i])) { primaryIndex = i; break; }
+  }
+  if (primaryIndex >= 0) parts[primaryIndex] += ' ฟรี';
+  else parts.push('ฟรี');
+  return parts.join(' | ');
+}
+
+function isFreeChapterRangeDocumentName_(documentName) {
+  var normalizedName = String(documentName || '').trim();
+  if (!normalizedName) return false;
+  var match = normalizedName.match(/(?:^|[^0-9])(0*1)\s*[-–—]\s*([0-9]+)\s*$/);
+  if (!match) return false;
+  var start = Number(match[1]);
+  var end = Number(match[2]);
+  return start === 1 && Number.isInteger(end) && end > start;
+}
+
+function isFreeChapterRangeDocument_(doc) {
+  try {
+    return !!doc && typeof doc.getName === 'function' && isFreeChapterRangeDocumentName_(doc.getName());
+  } catch (e) {
+    return false;
+  }
+}
+
+function isFreeDocumentByName_(doc) {
+  try {
+    if (doc && typeof isFreeChapterRangeDocument_ === 'function' && isFreeChapterRangeDocument_(doc)) return true;
+    var name = thaiDigitsToArabic_(String(doc && doc.getName ? doc.getName() : ''))
+      .replace(INVIS_RE_, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return /^0*1(?:[^0-9]|$)/.test(name);
+  } catch (e) {
+    return false;
+  }
+}
+
+// ===== buildLightScanColumnNotes_ (สำเนาตรงจาก Checker_Batch perf-3) =====
 function buildLightScanColumnNotes_(summary, doc) {
   summary = summary || {};
 
   var lang = [];
+  // จำนวนบทสำหรับ Export IpeNovel (sheetNotePerChapter): ทุกแท็บในไฟล์ หักแท็บหมายเหตุจากต้นฉบับ/ต่างประเทศ
+  var sourceNoteTabList = summary.sourceNoteTabNumbers || [];
+  var countedTabs = Math.max(0, Number(summary.tabTotal || 0) - sourceNoteTabList.length);
+  lang.push('เสร็จ ' + countedTabs);
+  var coverage = summary.untranslatedCoverage || null;
   var coverage = summary.untranslatedCoverage || null;
   var coverageIncomplete = !!coverage && coverage.complete === false;
   var nonThai = Number(summary.nonThaiCount || 0);
@@ -285,6 +346,10 @@ function buildLightScanColumnNotes_(summary, doc) {
     other.push('ตรวจ ' + Number(summary.tabTotal || 0) + ' แท็บ ทุกแท็บมีเนื้อหา');
   }
 
+  if (sourceNoteTabList.length) {
+    other.push('ยกเว้นแท็บหมายเหตุ (' + sourceNoteTabList.length + ' แท็บ ไม่นับเข้าเสร็จ ' + countedTabs + '): แท็บ ' + formatTabNumberList_(sourceNoteTabList));
+  }
+
   var junkByGroup = {};
   var junkOrder = [];
   (summary.tailJunkTabGroups || []).forEach(function(item) {
@@ -320,8 +385,8 @@ function buildLightScanColumnNotes_(summary, doc) {
   var noteSequence = dedupeCheckerNotes_(seq.join(' | '));
   var noteOther = dedupeCheckerNotes_(other.join(' | '));
 
-  if (doc && typeof isFreeChapterRangeDocument_ === 'function') {
-    noteLanguage = addCheckerFreeMarker_(noteLanguage, isFreeChapterRangeDocument_(doc));
+  if (doc && typeof isFreeDocumentByName_ === 'function') {
+    noteLanguage = addCheckerFreeMarker_(noteLanguage, isFreeDocumentByName_(doc));
   }
 
   return { noteLanguage: noteLanguage, noteSequence: noteSequence, noteOther: noteOther };
@@ -448,6 +513,58 @@ expectEqual('N รายงานแท็บว่าง', otherNotes.noteOther
 expectEqual('N รายงานขยะท้ายบทแยกกลุ่ม',
   otherNotes.noteOther.indexOf('ขยะท้ายบท โปรโมต/ลิงก์: แท็บ 11') !== -1 &&
   otherNotes.noteOther.indexOf('ขยะท้ายบท คอมเมนต์/โหวต: แท็บ 11') !== -1, true);
+
+console.log("\n=== เสร็จ N (จำนวนแท็บสำหรับ Export IpeNovel) ===\n");
+
+var countNotes = buildLightScanColumnNotes_({
+  nonThaiCount: 0,
+  tabTotal: 50,
+  untranslatedCoverage: { checked: 50, total: 50, complete: true },
+  chapterSequenceIssues: [],
+  contentDuplicates: [],
+  emptyTabNumbers: [],
+  announcementTabNumbers: [],
+  sourceNoteTabNumbers: [],
+  tailJunkTabGroups: []
+});
+expectEqual('50 แท็บ ไม่มีแท็บหมายเหตุ => L ขึ้นต้น เสร็จ 50', countNotes.noteLanguage.indexOf('เสร็จ 50 | ') === 0, true);
+
+var countWithNote = buildLightScanColumnNotes_({
+  nonThaiCount: 0,
+  tabTotal: 50,
+  untranslatedCoverage: { checked: 50, total: 50, complete: true },
+  chapterSequenceIssues: [],
+  contentDuplicates: [],
+  emptyTabNumbers: [],
+  announcementTabNumbers: [],
+  sourceNoteTabNumbers: [3, 9],
+  tailJunkTabGroups: []
+});
+expectEqual('หักแท็บหมายเหตุ 2 แท็บ => เสร็จ 48', countWithNote.noteLanguage.indexOf('เสร็จ 48 | ') === 0, true);
+expectEqual('N รายงานแท็บหมายเหตุที่ยกเว้น',
+  countWithNote.noteOther.indexOf('ยกเว้นแท็บหมายเหตุ (2 แท็บ ไม่นับเข้าเสร็จ 48): แท็บ 3, 9') !== -1, true);
+
+console.log("\n=== ฟรี ตามชื่อไฟล์ (ขึ้นต้น 001 / ช่วงเลขเริ่ม 1) ===\n");
+
+expectEqual('ชื่อไฟล์ "001 - 050 เรื่องแปล" => ฟรี', isFreeDocumentByName_({ getName: function() { return '001 - 050 เรื่องแปล'; } }), true);
+expectEqual('ชื่อไฟล์ "๐๐๑ - ๐๕๐ เรื่องแปล" (เลขไทย) => ฟรี', isFreeDocumentByName_({ getName: function() { return '๐๐๑ - ๐๕๐ เรื่องแปล'; } }), true);
+expectEqual('ชื่อไฟล์ "136 - 185 เรื่องแปล" (ช่วงเริ่ม 136) => ไม่ฟรี', isFreeDocumentByName_({ getName: function() { return '136 - 185 เรื่องแปล'; } }), false);
+expectEqual('ชื่อไฟล์ "001 เรื่องแปล" (ขึ้นต้น 001 ไม่มีช่วง) => ฟรี', isFreeDocumentByName_({ getName: function() { return '001 เรื่องแปล'; } }), true);
+expectEqual('ชื่อไฟล์ "เรื่องแปลธรรมดา" => ไม่ฟรี', isFreeDocumentByName_({ getName: function() { return 'เรื่องแปลธรรมดา'; } }), false);
+
+var freeNotes = buildLightScanColumnNotes_({
+  nonThaiCount: 0,
+  tabTotal: 50,
+  untranslatedCoverage: { checked: 50, total: 50, complete: true },
+  chapterSequenceIssues: [],
+  contentDuplicates: [],
+  emptyTabNumbers: [],
+  announcementTabNumbers: [],
+  sourceNoteTabNumbers: [],
+  tailJunkTabGroups: []
+}, { getName: function() { return '001 - 050 เรื่องแปล'; } });
+expectEqual('L มีคำว่า ฟรี เมื่อชื่อไฟล์ 001', freeNotes.noteLanguage.indexOf('ฟรี') !== -1, true);
+expectEqual('L ยังมี เสร็จ 50 ควบคู่กัน', freeNotes.noteLanguage.indexOf('เสร็จ 50') !== -1, true);
 
 console.log("\n=========================");
 console.log('parity cases: ' + parityChecked + ' ตัวอย่าง x 4 การตรวจ');
