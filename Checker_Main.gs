@@ -12,13 +12,13 @@ const CHECKER_CFG = {
     episodeUrl: 3,    // C: ลิงก์ตอน / Google Docs
     sourceUrl: 4,     // D: ลิงก์ต้นฉบับเดิม
     sourceUrl2: 5,    // E: คอลัมน์ที่เพิ่มใหม่ / ลิงก์ต้นฉบับอีกช่อง
-    checked: 6,       // F: Checked
-    knownWords: 7,    // G: Reviewed / เช็คคำแล้ว
-    posted: 8,        // H: ลงแล้ว
-    noThai: 9,        // I: ไม่มีใน Thai
-    draftGroup: 10,   // J: ร่างกลุ่มแล้ว
-    note: 12,         // L: หมายเหตุ
-    pdfUrl: 14        // N: PDF URL ล่าสุด แยกจาก M ที่ใช้เป็นสถานะตั้งค่าไฟล์
+    checked: 7,       // G: Checked (แทรกคอลัมน์ F กำหนดอ่านแล้วขยับ +1)
+    knownWords: 8,    // H: Reviewed / เช็คคำแล้ว
+    posted: 9,        // I: ลงแล้ว
+    noThai: 10,       // J: ไม่มีใน Thai
+    draftGroup: 11,   // K: ร่างกลุ่มแล้ว
+    note: 13,         // M: หมายเหตุ
+    pdfUrl: 15        // O: PDF URL ล่าสุด แยกจาก N ที่ใช้เป็นสถานะตั้งค่าไฟล์
   },
   PAGE_SIZE: 200,
   PDF_FOLDER_ID: '1CHSTVNa3MArRYgCSZ2-Fxa_pL-qoNBCK',

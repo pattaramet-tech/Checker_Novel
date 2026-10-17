@@ -14,7 +14,7 @@ const DRIVE_SHARE_CONFIG = {
   START_ROW: 2,
 
   LINK_COL: 3,        // C
-  STATUS_COL: 13,      // D
+  STATUS_COL: 14,     // N (แทรกคอลัมน์ F แล้วขยับจาก M เป็น N)
 
   MAX_ROWS_PER_RUN: 15,       // แนะนำ 10-20 สำหรับไฟล์จำนวนมาก
   MAX_RUN_MS: 3.5 * 60 * 1000,
