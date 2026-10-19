@@ -260,6 +260,55 @@ function isFreeDocumentByName_(doc) {
   }
 }
 
+// ===== Empty/source-note tab classification (จาก Checker_Batch perf-7) =====
+function checkerIsEmptyTabAnnouncementLine_(text) {
+  var s = thaiDigitsToArabic_(cleanText_(text));
+  if (!s) return true;
+  for (var i = 0; i < EMPTY_TAB_SCAN_CONFIG_.ANNOUNCEMENT_RE_.length; i++) {
+    if (EMPTY_TAB_SCAN_CONFIG_.ANNOUNCEMENT_RE_[i].test(s)) return true;
+  }
+  return false;
+}
+
+function checkerClassifyTabContent_(text) {
+  var result = { hasNoContent: true, meaningfulParagraphCount: 0, isSourceNoteTab: false };
+  var lines = String(text || '').split('\n');
+  var headingLines = [];
+
+  for (var i = 0; i < lines.length; i++) {
+    var t = cleanText_(lines[i]);
+    if (!t || t === NOTE_TEXT_) continue;
+    if (typeof isStatusPanelLine_ === 'function' && isStatusPanelLine_(t)) continue;
+    // เช็คหัวบทก่อนบรรทัดประกาศ เพื่อไม่ให้ /จากต้นฉบับ/ กินหัวบท "หมายเหตุจากต้นฉบับ"
+    if (isChapterLineText_(normalizeChapterLine_(t))) {
+      headingLines.push(normalizeChapterLine_(t));
+      continue;
+    }
+    if (checkerIsEmptyTabAnnouncementLine_(t)) continue;
+    result.hasNoContent = false;
+    result.meaningfulParagraphCount++;
+  }
+
+  // แท็บหมายเหตุ: ใช้ "หัวบทแรกของแท็บ" เป็นตัวตั้ง — หัวบทแรกตรง SOURCE_NOTE_TAB_RE_
+  // (เช่น "บทที่ 433 หมายเหตุจากต้นฉบับ") = แท็บหมายเหตุ แม้มีบรรทัดโปรโมต/คำอธิบายปน
+  if (headingLines.length) {
+    var patterns = EMPTY_TAB_SCAN_CONFIG_.SOURCE_NOTE_TAB_RE_ || [];
+    var firstHeading = headingLines[0];
+    var matched = patterns.length > 0;
+    for (var k = 0; k < patterns.length; k++) {
+      if (!patterns[k].test(firstHeading)) { matched = false; break; }
+    }
+    if (matched) result.isSourceNoteTab = true;
+  }
+
+  return result;
+}
+
+function checkerShouldFlagEmptyTab_(info) {
+  info = info || {};
+  return !!info.hasNoContent && !info.isSourceNoteTab;
+}
+
 // ===== buildLightScanColumnNotes_ (สำเนาตรงจาก Checker_Batch perf-3) =====
 function buildLightScanColumnNotes_(summary, doc) {
   summary = summary || {};
@@ -599,6 +648,24 @@ var allChaptersSeq = checkChapterSequenceFromChapters_([
   { chapterNumber: 140 }
 ]);
 expectEqual('ถ้านับกลางเนื้อเรื่องจะขึ้นเลขข้าม (พฤติกรรมเก่า ใช้ยืนยันว่า logic จับได้)', allChaptersSeq.issues.length > 0, true);
+
+console.log("\n=== แท็บหมายเหตุจากต้นฉบับ (ไม่นับเข้า เสร็จ N) ===\n");
+
+var sourceNoteCases = [
+  { text: "บทที่ 433 หมายเหตุจากต้นฉบับ\nเผล Ipe นิยายแปล เว็บไซต์ Ipenovel.com", note: true, flag: false, desc: "เคสจริงแท็บ 43: หัวบทหมายเหตุ + โปรโมต Ipe" },
+  { text: "บทที่ 434 หมายเหตุจากต้นฉบับ\nเผล Ipe นิยายแปล เว็บไซต์ Ipenovel.com", note: true, flag: false, desc: "เคสจริงแท็บ 44" },
+  { text: "บทที่ 435 หมายเหตุจากต้นฉบับ\nเนื่องจากที่กันบทที่ 432", note: true, flag: false, desc: "เคสจริงแท็บ 45: หัวบทหมายเหตุ + คำอธิบาย" },
+  { text: "บทที่ 138 หมายเหตุจากต้นฉบับ", note: true, flag: false, desc: "หัวบทหมายเหตุล้วน" },
+  { text: "บทที่ 138 หมายเหตุจากต้นฉบับ\nจบตอน", note: true, flag: false, desc: "หมายเหตุ + จบตอน" },
+  { text: "บทที่ 138", note: false, flag: true, desc: "หัวบทธรรมดาไม่มีคำหมายเหตุ = นับเป็นแท็บว่าง" },
+  { text: "บทที่ 500 ชื่อบทจริง\nเขาเดินเข้ามาอย่างช้า ๆ\nบทที่ 499 หมายเหตุจากต้นฉบับ", note: false, flag: false, desc: "นิยายจริง (หัวบทแรกไม่ใช่หมายเหตุ) = ไม่ยกเว้น" }
+];
+
+sourceNoteCases.forEach(function(c) {
+  var info = checkerClassifyTabContent_(c.text);
+  expectEqual(c.desc + " (isSourceNoteTab)", info.isSourceNoteTab, c.note);
+  expectEqual(c.desc + " (flag เป็นแท็บว่าง)", checkerShouldFlagEmptyTab_(info), c.flag);
+});
 
 console.log("\n=========================");
 console.log('parity cases: ' + parityChecked + ' ตัวอย่าง x 4 การตรวจ');

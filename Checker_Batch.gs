@@ -2249,7 +2249,8 @@ function checkerIsEmptyTabAnnouncementLine_(text) {
  * จำแนกเนื้อความของแท็บ (pure function แยกจาก body เพื่อให้เทสได้)
  * - hasNoContent: true เมื่อทุกบรรทัดเป็นบรรทัดว่าง/หมายเหตุระบบ/แผงสถานะ/ประกาศ/หัวบทล้วน ๆ
  * - meaningfulParagraphCount: จำนวนย่อหน้าเนื้อหาจริง (ไม่นับบรรทัดว่าง/หัวบท/ประกาศ)
- * - isSourceNoteTab: true เมื่อเป็นแท็บหัวบทล้วน "หมายเหตุจากต้นฉบับ" — ไม่นับเป็นแท็บว่าง
+ * - isSourceNoteTab: true เมื่อ "หัวบทแรกของแท็บ" ประกาศตัวเองว่าหมายเหตุจากต้นฉบับ/ต่างประเทศ
+ *   (แม้จะมีบรรทัดโปรโมต/คำอธิบายสั้น ๆ ปนในแท็บก็ยังนับเป็นแท็บหมายเหตุ)
  */
 function checkerClassifyTabContent_(text) {
   var result = { hasNoContent: true, meaningfulParagraphCount: 0, isSourceNoteTab: false };
@@ -2270,15 +2271,17 @@ function checkerClassifyTabContent_(text) {
     result.meaningfulParagraphCount++;
   }
 
-  if (result.hasNoContent && headingLines.length) {
-    var allSourceNote = headingLines.every(function(h) {
-      var patterns = EMPTY_TAB_SCAN_CONFIG_.SOURCE_NOTE_TAB_RE_ || [];
-      for (var k = 0; k < patterns.length; k++) {
-        if (!patterns[k].test(h)) return false;
-      }
-      return patterns.length > 0;
-    });
-    if (allSourceNote) result.isSourceNoteTab = true;
+  // แท็บหมายเหตุ: ใช้ "หัวบทแรกของแท็บ" เป็นตัวตั้ง — หัวบทแรกตรง SOURCE_NOTE_TAB_RE_
+  // (เช่น "บทที่ 433 หมายเหตุจากต้นฉบับ") = แท็บหมายเหตุ แม้มีบรรทัดโปรโมต/คำอธิบายปน
+  // ไม่ใช่หัวบทกลางเนื้อเรื่องของนิยายจริง จึงไม่กระทบแท็บนิยายปกติ
+  if (headingLines.length) {
+    var patterns = EMPTY_TAB_SCAN_CONFIG_.SOURCE_NOTE_TAB_RE_ || [];
+    var firstHeading = headingLines[0];
+    var matched = patterns.length > 0;
+    for (var k = 0; k < patterns.length; k++) {
+      if (!patterns[k].test(firstHeading)) { matched = false; break; }
+    }
+    if (matched) result.isSourceNoteTab = true;
   }
 
   return result;
@@ -3253,7 +3256,7 @@ function buildLightScanColumnNotes_(summary, doc) {
  *   และ Text.replaceText สำหรับ — / و / เลขไทย (ข้อความใหม่รับฟอร์แมตของข้อความเดิม)
  * ========================================================= */
 
-const LIGHT_SCAN_VERSION_ = 'perf-6';
+const LIGHT_SCAN_VERSION_ = 'perf-7';
 
 var __LIGHT_SCAN_PERF__ = null;
 
