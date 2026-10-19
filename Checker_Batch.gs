@@ -2895,12 +2895,14 @@ function detectEnglishSourceReportOnly_() {
 }
 
 /**
- * โหมดตรวจเบาต่อแท็บ (perf-1: single-pass snapshot)
+ * โหมดตรวจเบาต่อแท็บ (single-pass snapshot, ปัจจุบัน perf-6)
  * อ่านข้อความย่อหน้าครั้งเดียว แล้ว cleanup + ตัวตรวจทุกกลุ่มใช้ข้อความชุดเดียวกัน
- * - cleanup: — → ..., و → ล, เลขไทย → อารบิก, ลบ : หลังเลขบท (รักษาฟอร์แมต)
+ * - cleanup: — → ..., و → ล, เลขไทย → อารบิก, ลบ : หลังเลขบท, ตอนที่ → บทที่ (รักษาฟอร์แมต)
+ * - เลขบทนับเฉพาะหัวบทแรกของแท็บ บรรทัดกลางเนื้อเรื่องไม่นับ (ไม่ขึ้นเลขบทไม่ต่อเนื่องหลอก)
+ * - ไฮไลต์คำต่างประเทศด้วย highlightForeignCharacters() (ทำเป็นขั้นสุดท้าย)
  * - หลังแก้ จะ re-read เฉพาะย่อหน้า dirty เพื่อให้ตัวตรวจเห็นข้อความล่าสุด
- * - ขั้นตอนที่ข้าม: ลบอักษรละตินพิเศษ, ไฮไลต์คำต่างประเทศ, จัดหัวบท/แปลงหัวบท,
- *   ลบวงเล็บ/ชื่อซ้ำ/หัวบทซ้ำ, แยกบรรทัด, ย่อหน้า/ระยะห่าง, ลบบรรทัดว่าง, ฟอนต์ Sarabun
+ * - ขั้นตอนที่ข้าม: ลบอักษรละตินพิเศษ, จัดหัวบท/แปลงหัวบท, ลบวงเล็บ/ชื่อซ้ำ/หัวบทซ้ำ,
+ *   แยกบรรทัด, ย่อหน้า/ระยะห่าง, ลบบรรทัดว่าง, ฟอนต์ Sarabun
  */
 function runAllChecksLightScan_() {
   var body = getActiveBody_();
@@ -2923,10 +2925,6 @@ function runAllChecksLightScan_() {
   var joinedText = paraTexts.join('\n');
 
   // ===== ตรวจทั้งหมดจากข้อความชุดเดียวกัน (ไม่อ่านเอกสารซ้ำ) =====
-  var nonThaiCount = lightScanPerfTimed_('checkForeign', function() {
-    return countForeignCharactersFromTexts_(paraTexts);
-  });
-
   var sourceNoChapterNote = lightScanPerfTimed_('checkSourceNoChapter', function() {
     var found = detectSourceNoChapterNoteInLines_(paraTexts, SOURCE_NO_CHAPTER_NOTE_CONFIG_);
     return found.found
@@ -2944,7 +2942,10 @@ function runAllChecksLightScan_() {
 
   var chapterSequence = lightScanPerfTimed_('checkSequence', function() {
     var scan = collectChapterScanFromTexts_(paras, paraTexts);
-    return checkChapterSequenceFromChapters_(scan.chapters);
+    // นับเลขบทเฉพาะหัวบทแรกของแท็บ: บรรทัดคล้ายหัวบทกลางเนื้อเรื่องไม่นับ
+    // จึงไม่ขึ้น "เลขบทไม่ต่อเนื่อง" หลอก (การตรวจข้ามแท็บ เรียง/ซ้ำ/หาย ยังทำงานปกติ)
+    var firstOnly = scan.chapters.length ? [scan.chapters[0]] : [];
+    return checkChapterSequenceFromChapters_(firstOnly);
   });
 
   var longEnglish = lightScanPerfTimed_('checkLongEnglish', function() {
@@ -2961,6 +2962,15 @@ function runAllChecksLightScan_() {
 
   var junkGroups = lightScanPerfTimed_('checkJunk', function() {
     return scanTabTailJunkFromTexts_(paraTexts);
+  });
+
+  // ===== ไฮไลต์คำต่างประเทศ (ตามที่ผู้ใช้ขอ) — ทำเป็นขั้นสุดท้ายเพื่อไม่รบกวน snapshot การตรวจ =====
+  // ใช้ฟังก์ชันเดิม highlightForeignCharacters(): ล้างไฮไลต์เก่า → ไฮไลต์คำที่พบ (เกณฑ์เดิมทุกอย่าง
+  // รวมคำยกเว้นจากชีต/kaomoji) → แทรกหมายเหตุแดง "พบคำต่างประเทศ" บนสุดเมื่อพบ (เหมือนตรวจเต็ม)
+  var nonThaiCount = lightScanPerfTimed_('checkForeign', function() {
+    return (typeof highlightForeignCharacters === 'function')
+      ? Number(highlightForeignCharacters() || 0)
+      : 0;
   });
 
   return {
@@ -3230,19 +3240,20 @@ function buildLightScanColumnNotes_(summary, doc) {
 }
 
 /* =========================================================
- * LightScan PERF (perf-1): instrumentation + single-pass snapshot
+ * LightScan PERF (ปัจจุบัน perf-6): instrumentation + single-pass snapshot
  * - เพิ่มขึ้นจากงานเพิ่มความเร็ว "ตรวจแถวที่เลือก" บน branch perf/lightscan-fast
  * - วัดผ่าน run ID ต่องาน: นับจำนวนเปิดเอกสาร/อ่านย่อหน้า/hash + เวลาแต่ละขั้น
  *   ไม่บันทึกเนื้อหานิยายหรือข้อมูลลับลง log (มีแต่ตัวเลขและชื่อ stage)
  * - โหมด lightScan อ่านย่อหน้าครั้งเดียวต่อแท็บ (snapshot) แล้วให้ cleanup + ตัวตรวจ
  *   ทุกกลุ่มใช้ข้อความชุดเดียวกัน แทนการไล่อ่านเอกสารซ้ำหลายรอบ
- * - คงเกณฑ์การตรวจและการแก้เนื้อหาเบาเดิมทุกข้อ: — → ..., و → ล, เลขไทย → อารบิก,
- *   ลบ : หลังเลขบท, ไม่จัดฟอร์แมต, ไม่ลบขยะท้ายบท/เติมจบตอน
+ * - คงเกณฑ์การตรวจและการแก้เนื้อหาเบาเดิม: — → ..., و → ล, เลขไทย → อารบิก,
+ *   ลบ : หลังเลขบท, ตอนที่ → บทที่ (หัวบทแรก), ไฮไลต์คำต่างประเทศ (perf-6),
+ *   เลขบทนับเฉพาะหัวบทแรกของแท็บ, ไม่ลบขยะท้ายบท/เติมจบตอน
  * - การแก้ข้อความรักษาฟอร์แมต: ใช้ deleteText/insertText เฉพาะช่วง colon
  *   และ Text.replaceText สำหรับ — / و / เลขไทย (ข้อความใหม่รับฟอร์แมตของข้อความเดิม)
  * ========================================================= */
 
-const LIGHT_SCAN_VERSION_ = 'perf-5';
+const LIGHT_SCAN_VERSION_ = 'perf-6';
 
 var __LIGHT_SCAN_PERF__ = null;
 

@@ -565,6 +565,41 @@ var freeNotes = buildLightScanColumnNotes_({
 expectEqual('L มีคำว่า ฟรี เมื่อชื่อไฟล์ 001', freeNotes.noteLanguage.indexOf('ฟรี') !== -1, true);
 expectEqual('L ยังมี เสร็จ 50 ควบคู่กัน', freeNotes.noteLanguage.indexOf('เสร็จ 50') !== -1, true);
 
+// ลำดับบทภายในแท็บ (port ตรงจาก checkChapterSequenceFromChapters_)
+function checkChapterSequenceFromChapters_(chapters) {
+  var issues = [];
+
+  for (var i = 1; i < chapters.length; i++) {
+    var prev = chapters[i - 1];
+    var curr = chapters[i];
+    var expected = prev.chapterNumber + 1;
+
+    if (curr.chapterNumber !== expected) {
+      var type = 'ไม่ต่อเนื่อง';
+      if (curr.chapterNumber === prev.chapterNumber) type = 'เลขซ้ำ';
+      else if (curr.chapterNumber < prev.chapterNumber) type = 'เลขย้อนหลัง';
+      else if (curr.chapterNumber > expected) type = 'เลขข้าม';
+
+      issues.push({ type: type, expected: expected, previous: prev.chapterNumber, current: curr.chapterNumber });
+    }
+  }
+
+  return { ok: issues.length === 0, totalFound: chapters.length, chapters: chapters, issues: issues };
+}
+
+console.log("\n=== เลขบทนับเฉพาะหัวบทแรกของแท็บ ===\n");
+
+// lightScan ส่งเฉพาะ chapters[0] เข้าลำดับบท — บรรทัดกลางเนื้อเรื่องต้องไม่ทำให้ไม่ต่อเนื่อง
+var firstOnlySeq = checkChapterSequenceFromChapters_([{ chapterNumber: 138, text: 'บทที่ 138 หมายเหตุจากต้นฉบับ' }]);
+expectEqual('แท็บเดียวมีหัวบทเดียว => ต่อเนื่อง ไม่มี issue', firstOnlySeq.ok, true);
+expectEqual('จำนวน issue เป็น 0', firstOnlySeq.issues.length, 0);
+
+var allChaptersSeq = checkChapterSequenceFromChapters_([
+  { chapterNumber: 138 },
+  { chapterNumber: 140 }
+]);
+expectEqual('ถ้านับกลางเนื้อเรื่องจะขึ้นเลขข้าม (พฤติกรรมเก่า ใช้ยืนยันว่า logic จับได้)', allChaptersSeq.issues.length > 0, true);
+
 console.log("\n=========================");
 console.log('parity cases: ' + parityChecked + ' ตัวอย่าง x 4 การตรวจ');
 console.log(failed === 0 ? "✅ ผ่านทุกเคส" : "❌ ไม่ผ่าน " + failed + " เคส");
