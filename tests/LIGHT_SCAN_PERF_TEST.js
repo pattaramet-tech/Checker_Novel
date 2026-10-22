@@ -440,6 +440,75 @@ function buildLightScanColumnNotes_(summary, doc) {
   return { noteLanguage: noteLanguage, noteSequence: noteSequence, noteOther: noteOther };
 }
 
+// ===== Tail junk lines (จาก Checker_Batch perf-8) =====
+const TAIL_JUNK_SCAN_CFG_ = { COLUMN: 15, TAIL_PARAGRAPHS: 10 };
+
+function normalizeTailJunkText_(text) {
+  return String(text || '')
+    .replace(INVIS_RE_, ' ')
+    .replace(/[“”"'`*_#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function classifyTailJunkLine_(text) {
+  var s = thaiDigitsToArabic_(normalizeTailJunkText_(text));
+  if (!s) return null;
+
+  if (/^(?:ความคิด|ความคิดเห็น|หมายเหตุ|บันทึก)\s*(?:ของ)?\s*(?:ผู้สร้าง|ผู้เขียน|ผู้แต่ง|ผู้ประพันธ์)\s*:?\s*$/i.test(s) ||
+      /^(?:author'?s?|creator'?s?)\s+(?:thoughts?|notes?)\s*:?\s*$/i.test(s)) {
+    return 'AUTHOR';
+  }
+
+  if (/takamiya[_\s-]*shin/i.test(s) || /^([a-z][a-z0-9_.-]{2,})\s+\1$/i.test(s)) {
+    return 'PROMO';
+  }
+
+  if (/patreon/i.test(s) ||
+      /อ่านล่วงหน้า/.test(s) ||
+      /(?:อ่าน|ติดตาม).{0,12}(?:ตอน|บท|เนื้อหา)?\s*(?:เพิ่มเติม|เพิ่ม|ต่อไป)/.test(s) ||
+      /\b(?:read\s+more|more\s+chapters?|next\s+chapters?|early\s+chapters?)\b/i.test(s) ||
+      /\bbit\.ly\//i.test(s)) {
+    return 'PROMO';
+  }
+
+  if (/paypal\.me\/|ko-fi\.com\/|buymeacoffee\.com\//i.test(s) ||
+      /(?:สนับสนุน|บริจาค|โดเนท|อุดหนุน)\s*(?:ผู้เขียน|ผู้แต่ง|ผู้สร้าง|ผู้ประพันธ์|นิยาย|เรื่อง)/.test(s)) {
+    return 'PROMO';
+  }
+
+  if (/^(?:ความคิดเห็น|คอมเมนต์|ความเห็น)\s*[:：]?\s*[0-9]*\s*$/.test(s) ||
+      /^(?:comments?|reviews?)\s*[:：]?\s*[0-9]*\s*$/i.test(s)) {
+    return 'UI';
+  }
+
+  if (/^(?:โหวต|คะแนนโหวต|จำนวนโหวต)\s*[:：]?\s*[0-9]*\s*$/.test(s) ||
+      /^(?:votes?|voting)\s*[:：]?\s*[0-9]*\s*$/i.test(s)) {
+    return 'UI';
+  }
+
+  if (/^(?:power\s*stones?|powerstone)\s*[:：]?\s*[0-9]*\s*$/i.test(s) ||
+      /^(?:พาวเวอร์\s*สโตน|หินพลัง)\s*[:：]?\s*[0-9]*\s*$/.test(s)) {
+    return 'UI';
+  }
+
+  return null;
+}
+
+function scanTabTailJunkLines_(texts) {
+  var found = [];
+  var limit = Number(TAIL_JUNK_SCAN_CFG_.TAIL_PARAGRAPHS || 10);
+  var startIdx = Math.max(0, (texts || []).length - limit);
+
+  for (var i = startIdx; i < (texts || []).length; i++) {
+    if (!String(texts[i] || '').trim()) continue;
+    var group = classifyTailJunkLine_(texts[i]);
+    if (group) found.push({ lineIdx: i, group: group });
+  }
+
+  return found;
+}
+
 // ===== TEST RUNNER =====
 let failed = 0;
 function expectEqual(desc, actual, expected) {
@@ -666,6 +735,26 @@ sourceNoteCases.forEach(function(c) {
   expectEqual(c.desc + " (isSourceNoteTab)", info.isSourceNoteTab, c.note);
   expectEqual(c.desc + " (flag เป็นแท็บว่าง)", checkerShouldFlagEmptyTab_(info), c.flag);
 });
+
+console.log("\n=== scanTabTailJunkLines_ (หาบรรทัดขยะท้ายบทเพื่อไฮไลต์) ===\n");
+
+// สร้างแท็บ 12 ย่อหน้า: เนื้อเรื่อง 9 ย่อหน้า + ขยะ 2 บรรทัด (idx 10, 11) + จบตอน (idx 11 หลัง shift)
+var tabTexts = [];
+for (var tI = 0; tI < 9; tI++) tabTexts.push('ย่อหน้าเนื้อเรื่องที่ ' + (tI + 1) + ' มีเนื้อหายาวพอควรสำหรับนิยาย');
+tabTexts.push('อ่านล่วงหน้าได้อีก 20 บทบน Patreon ของฉัน!');       // idx 9  PROMO
+tabTexts.push('ความคิดเห็น 19');                                    // idx 10  UI
+tabTexts.push('จบตอน');                                             // idx 11  ไม่ใช่ขยะ
+
+var junkLines = scanTabTailJunkLines_(tabTexts);
+expectEqual('หาขยะได้ 2 บรรทัด (ใน 10 ย่อหน้าท้าย)', junkLines.length, 2);
+expectEqual('บรรทัดแรก idx 9 กลุ่ม PROMO', JSON.stringify(junkLines[0]), JSON.stringify({ lineIdx: 9, group: 'PROMO' }));
+expectEqual('บรรทัดที่สอง idx 10 กลุ่ม UI', JSON.stringify(junkLines[1]), JSON.stringify({ lineIdx: 10, group: 'UI' }));
+expectEqual('บรรทัด จบตอน ไม่ถูกนับเป็นขยะ', junkLines.some(function(j) { return j.lineIdx === 11; }), false);
+
+// ขยะที่อยู่นอกช่วงท้าย 10 ย่อหน้า ต้องไม่ถูกจับ
+var longTexts = ['อ่านล่วงหน้าได้อีก 20 บทบน Patreon ของฉัน!'];
+for (var tJ = 0; tJ < 14; tJ++) longTexts.push('ย่อหน้าเนื้อเรื่องปกติที่ ' + (tJ + 1));
+expectEqual('ขยะนอกช่วงท้าย 10 ย่อหน้า ไม่ถูกจับ', scanTabTailJunkLines_(longTexts).length, 0);
 
 console.log("\n=========================");
 console.log('parity cases: ' + parityChecked + ' ตัวอย่าง x 4 การตรวจ');

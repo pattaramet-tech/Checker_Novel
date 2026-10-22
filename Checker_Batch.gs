@@ -2903,6 +2903,7 @@ function detectEnglishSourceReportOnly_() {
  * - cleanup: — → ..., و → ล, เลขไทย → อารบิก, ลบ : หลังเลขบท, ตอนที่ → บทที่ (รักษาฟอร์แมต)
  * - เลขบทนับเฉพาะหัวบทแรกของแท็บ บรรทัดกลางเนื้อเรื่องไม่นับ (ไม่ขึ้นเลขบทไม่ต่อเนื่องหลอก)
  * - ไฮไลต์คำต่างประเทศด้วย highlightForeignCharacters() (ทำเป็นขั้นสุดท้าย)
+ * - ไฮไลต์บรรทัดขยะท้ายบทสีเหลืองอำพัน #FFD966 (ทำหลังไฮไลต์คำต่างประเทศ)
  * - หลังแก้ จะ re-read เฉพาะย่อหน้า dirty เพื่อให้ตัวตรวจเห็นข้อความล่าสุด
  * - ขั้นตอนที่ข้าม: ลบอักษรละตินพิเศษ, จัดหัวบท/แปลงหัวบท, ลบวงเล็บ/ชื่อซ้ำ/หัวบทซ้ำ,
  *   แยกบรรทัด, ย่อหน้า/ระยะห่าง, ลบบรรทัดว่าง, ฟอนต์ Sarabun
@@ -2963,8 +2964,12 @@ function runAllChecksLightScan_() {
     return checkerClassifyTabContent_(joinedText);
   });
 
-  var junkGroups = lightScanPerfTimed_('checkJunk', function() {
-    return scanTabTailJunkFromTexts_(paraTexts);
+  var junkLines = lightScanPerfTimed_('checkJunk', function() {
+    return scanTabTailJunkLines_(paraTexts);
+  });
+  var junkGroups = [];
+  junkLines.forEach(function(j) {
+    if (junkGroups.indexOf(j.group) === -1) junkGroups.push(j.group);
   });
 
   // ===== ไฮไลต์คำต่างประเทศ (ตามที่ผู้ใช้ขอ) — ทำเป็นขั้นสุดท้ายเพื่อไม่รบกวน snapshot การตรวจ =====
@@ -2976,6 +2981,16 @@ function runAllChecksLightScan_() {
       : 0;
   });
 
+  // ===== ไฮไลต์บรรทัดขยะท้ายบท (ตามที่ผู้ใช้ขอ) — ต้องทำหลังไฮไลต์คำต่างประเทศ
+  // เพราะขั้นนั้นล้างสีพื้นหลังทั้งเอกสารก่อน สีขยะจึงไม่ถูกล้างทิ้ง
+  var junkHighlighted = 0;
+  if (junkLines.length) {
+    junkHighlighted = lightScanPerfTimed_('highlightJunk', function() {
+      return highlightTailJunkLines_(paras, junkLines);
+    });
+    lightScanPerfCount_('junkLinesHighlighted', junkHighlighted);
+  }
+
   return {
     replacedEmDashCount: cleanup.counts.emDash,
     replacedWawCount: cleanup.counts.waw,
@@ -2983,6 +2998,7 @@ function runAllChecksLightScan_() {
     titleColonFixed: cleanup.counts.colon,
     thaiDigitFixed: cleanup.counts.thaiDigit,
     episodePrefixFixed: cleanup.counts.tonToBod,
+    junkLinesHighlighted: junkHighlighted,
     sourceNoChapterNote: sourceNoChapterNote,
     englishSourceCleanup: englishSourceCleanup,
     endingCleanup: endingCleanup,
@@ -3256,7 +3272,7 @@ function buildLightScanColumnNotes_(summary, doc) {
  *   และ Text.replaceText สำหรับ — / و / เลขไทย (ข้อความใหม่รับฟอร์แมตของข้อความเดิม)
  * ========================================================= */
 
-const LIGHT_SCAN_VERSION_ = 'perf-7';
+const LIGHT_SCAN_VERSION_ = 'perf-8';
 
 var __LIGHT_SCAN_PERF__ = null;
 
@@ -3686,6 +3702,44 @@ function scanTabTailJunkFromTexts_(texts) {
   }
 
   return groups;
+}
+
+/**
+ * หา "บรรทัด" ขยะท้ายบทพร้อมตำแหน่ง (pure function เทสได้)
+ * คืน [{ lineIdx: 0-based, group }] เฉพาะบรรทัดที่จับได้ — ใช้ไฮไลต์ในเอกสารให้ผู้ใช้ตามหาเจอ
+ */
+function scanTabTailJunkLines_(texts) {
+  var found = [];
+  var limit = Number(TAIL_JUNK_SCAN_CFG_.TAIL_PARAGRAPHS || 10);
+  var startIdx = Math.max(0, (texts || []).length - limit);
+
+  for (var i = startIdx; i < (texts || []).length; i++) {
+    if (!String(texts[i] || '').trim()) continue;
+    var group = classifyTailJunkLine_(texts[i]);
+    if (group) found.push({ lineIdx: i, group: group });
+  }
+
+  return found;
+}
+
+/** ไฮไลต์สีทั้งบรรทัดขยะท้ายบท (เหลืองอำพัน) คืนจำนวนบรรทัดที่ไฮไลต์ */
+function highlightTailJunkLines_(paras, junkLines) {
+  var highlighted = 0;
+
+  (junkLines || []).forEach(function(j) {
+    var p = paras && paras[j.lineIdx];
+    if (!p || typeof p.editAsText !== 'function') return;
+    try {
+      var editor = p.editAsText();
+      var len = editor.getText().length;
+      if (len > 0) {
+        editor.setBackgroundColor(0, len - 1, '#FFD966');
+        highlighted++;
+      }
+    } catch (e) {}
+  });
+
+  return highlighted;
 }
 
 /** ต้นฉบับอังกฤษ report-only จากข้อความย่อหน้า (ตัวตรวจเดิม detectEnglishSourceBlock_ รับ texts อยู่แล้ว) */
