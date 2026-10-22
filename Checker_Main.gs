@@ -230,7 +230,9 @@ const COLON_CLASS_ = "[:：﹕꞉∶։]";
 // มาตรฐานหัวบทปัจจุบันคือ Sarabun 18 (ตรงกับ setFontToSarabun16() ที่ตั้ง 18 จริง)
 const CHECKER_HEADING_FONT_SIZE_ = 18;
 const EXTRA_ALLOWED_CHARS_V9_ = new Set(["・"]);
-const FOREIGN_WORD_RE_V9_ = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u3040-\u30FF\u31F0-\u31FF\u3400-\u4DBF\u4E00-\u9FFF\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF\u0400-\u04FF\u1E00-\u1EFF\u0300-\u036F]+/g;
+// V9+perf-9: เพิ่ม \u0900-\u0DFF อักษรอินเดียทั้งตระกูล — เทวนาครี (ฮินดี/สันสกฤต เช่น री),
+// เบงกอล, กูรมุขี, คุชราต, โอเดีย, ทมิฬ, เตลุกู, กัณณาท, มลยาฬัม, สิงหล — เดิมหลุดจากการตรวจ
+const FOREIGN_WORD_RE_V9_ = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u0900-\u0DFF\uFB50-\uFDFF\uFE70-\uFEFF\u3040-\u30FF\u31F0-\u31FF\u3400-\u4DBF\u4E00-\u9FFF\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF\u0400-\u04FF\u1E00-\u1EFF\u0300-\u036F]+/g;
 
 // ===== Watermark =====
 const WM_TEXT = "ห้ามคัดลอก/เผยแพร่ By. charcoal gray silver gold maya เพจ Ipe นิยายแปล";

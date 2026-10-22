@@ -756,6 +756,26 @@ var longTexts = ['อ่านล่วงหน้าได้อีก 20 บ�
 for (var tJ = 0; tJ < 14; tJ++) longTexts.push('ย่อหน้าเนื้อเรื่องปกติที่ ' + (tJ + 1));
 expectEqual('ขยะนอกช่วงท้าย 10 ย่อหน้า ไม่ถูกจับ', scanTabTailJunkLines_(longTexts).length, 0);
 
+console.log("\n=== FOREIGN_WORD_RE_V9_ (ตรวจจับอักษรต่างประเทศ perf-9) ===\n");
+
+// สำเนา regex จาก Checker_Main.gs (perf-9: เพิ่มอักษรอินเดีย \u0900-\u0DFF)
+const FOREIGN_WORD_RE_V9_ = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u0900-\u0DFF\uFB50-\uFDFF\uFE70-\uFEFF\u3040-\u30FF\u31F0-\u31FF\u3400-\u4DBF\u4E00-\u9FFF\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF\u0400-\u04FF\u1E00-\u1EFF\u0300-\u036F]+/g;
+
+function countForeignMatches_(text) {
+  const re = new RegExp(FOREIGN_WORD_RE_V9_.source, 'g');
+  let count = 0, m;
+  while ((m = re.exec(text)) !== null) count++;
+  return count;
+}
+
+expectEqual('เทวนาครี "री" (ฮินดี) ถูกตรวจจับ', countForeignMatches_('ข้อความไทย रี ต่อ'), 1);
+expectEqual('เทวนาครี "रामायण" ถูกตรวจจับ', countForeignMatches_('रामायण'), 1);
+expectEqual('คาตากานะญี่ปุ่น "カロリー" ถูกตรวจจับ (มีอยู่แล้ว)', countForeignMatches_('カロリー バツ'), 2);
+expectEqual('ภาษาจีน "江湖" ถูกตรวจจับ (มีอยู่แล้ว)', countForeignMatches_('江湖'), 1);
+expectEqual('ภาษาเกาหลี "한국" ถูกตรวจจับ (มีอยู่แล้ว)', countForeignMatches_('한국'), 1);
+expectEqual('ภาษาไทย "คาทอรี" ไม่ถูกนับเป็นต่างประเทศ (ถูกต้อง)', countForeignMatches_('คาทอรี บัตสึอุนไซ'), 0);
+expectEqual('ภาษาอังกฤษไม่ถูกนับ (จับด้วยกฎยาวแยกต่างหาก)', countForeignMatches_('Patreon Ipenovel'), 0);
+
 console.log("\n=========================");
 console.log('parity cases: ' + parityChecked + ' ตัวอย่าง x 4 การตรวจ');
 console.log(failed === 0 ? "✅ ผ่านทุกเคส" : "❌ ไม่ผ่าน " + failed + " เคส");

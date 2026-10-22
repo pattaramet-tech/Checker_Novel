@@ -3272,7 +3272,7 @@ function buildLightScanColumnNotes_(summary, doc) {
  *   และ Text.replaceText สำหรับ — / و / เลขไทย (ข้อความใหม่รับฟอร์แมตของข้อความเดิม)
  * ========================================================= */
 
-const LIGHT_SCAN_VERSION_ = 'perf-8';
+const LIGHT_SCAN_VERSION_ = 'perf-9';
 
 var __LIGHT_SCAN_PERF__ = null;
 
