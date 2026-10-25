@@ -597,15 +597,75 @@ function readCheckerCommandQueue_() {
   }
 }
 
+/**
+ * ย่อ checkpoint ก่อนเก็บลง ScriptProperties (จำกัด 9KB/property)
+ * level 1: ตัด digest/fingerprint หนักใน tabChapterItems แต่คงโครงผลไว้ (resume ครบคุณภาพ)
+ * level 2: เหลือเฉพาะตัวนับ/รายการเลขแท็บ — resume ต่อได้แต่ผลข้ามแท็บ (M) อาจย่อส่วน
+ */
+function checkerTriggerSlimState_(state, level) {
+  const slim = {
+    items: (state && state.items) || [],
+    inFlight: state && state.inFlight ? JSON.parse(JSON.stringify(state.inFlight)) : null,
+    updatedAt: Number(state && state.updatedAt || 0)
+  };
+
+  const cp = slim.inFlight && slim.inFlight.checkpoint;
+  if (!cp || typeof cp !== 'object') return slim;
+
+  if (level >= 1) {
+    cp.tabChapterItems = (cp.tabChapterItems || []).map(function(item) {
+      return {
+        tab: item.tab,
+        tabIndex: item.tabIndex,
+        chapterNumber: item.chapterNumber,
+        paragraphIndex: item.paragraphIndex
+      };
+    });
+    cp.foreignTabCounts = (cp.foreignTabCounts || []).slice(0, 60);
+    cp.longEnglishTabCounts = (cp.longEnglishTabCounts || []).slice(0, 60);
+    cp.tabErrors = (cp.tabErrors || []).slice(0, 60).map(function(t) {
+      return { tabIndex: t.tabIndex, message: String(t.message || '').slice(0, 60) };
+    });
+  }
+
+  if (level >= 2) {
+    delete cp.tabChapterItems;
+    delete cp.contentDuplicates;
+    delete cp.chapterSequenceIssues;
+    delete cp.untranslatedEnglishTabs;
+    delete cp.foreignTabNames;
+  }
+
+  slim.inFlight.checkpoint = cp;
+  return slim;
+}
+
 function writeCheckerCommandQueue_(state) {
-  PropertiesService.getScriptProperties().setProperty(
-    getCheckerCommandQueuePropertyKey_(),
-    checkerTriggerSerializeQueueState_({
-      items: (state && state.items) || [],
-      inFlight: (state && state.inFlight) || null,
-      updatedAt: Date.now()
-    })
-  );
+  const props = PropertiesService.getScriptProperties();
+  const key = getCheckerCommandQueuePropertyKey_();
+
+  // ScriptProperties จำกัด 9KB/property — checkpoint ของเอกสารแท็บเยอะอาจล้น
+  // เขียนแบบมี fallback 3 ระดับ: เต็ม -> ย่อระดับ 1 -> ย่อระดับ 2 (กัน worker พังแล้วคิวค้าง)
+  const variants = [
+    state,
+    checkerTriggerSlimState_(state, 1),
+    checkerTriggerSlimState_(state, 2)
+  ];
+
+  let lastError = null;
+  for (let i = 0; i < variants.length; i++) {
+    try {
+      props.setProperty(key, checkerTriggerSerializeQueueState_(variants[i]));
+      if (i > 0) {
+        try { console.log('[CheckerTrigger] queue state compacted to level ' + i + ' (property size limit)'); } catch (eLog) {}
+      }
+      return;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  throw lastError;
 }
 
 /**
@@ -1139,27 +1199,34 @@ function sweepCheckerAutoScan() {
   }
 
   const picked = checkerTriggerPickAutoRows_(candidates, cfg);
-  if (!picked.length) return { ok: true, queued: 0 };
 
   const outcome = withCheckerCommandState_(function(state) {
     return checkerTriggerEnqueue_(state, picked, cfg);
   });
 
-  if (!outcome.ok) return { ok: false, queued: 0, reason: 'LOCKED' };
-
-  outcome.result.accepted.forEach(function(item) {
-    setCheckerCommandNote_(item.sheetRow, cfg.AUTO_SCAN_NOTE);
+  // self-heal: มีงานค้าง (คิว/inFlight) = เรียก worker ทุกรอบกวาด
+  // กันกรณี worker execution ก่อนหน้าล้ม (เช่น property เกินขนาด) แล้วคิวค้างตลอด
+  const snap = withCheckerCommandState_(function(state) {
+    return { queueLength: (state.items || []).length, hasInFlight: !!state.inFlight };
   });
+  const hasWork = snap.ok && (snap.result.queueLength > 0 || snap.result.hasInFlight);
 
-  if (outcome.result.accepted.length) {
+  if (outcome.ok) {
+    outcome.result.accepted.forEach(function(item) {
+      setCheckerCommandNote_(item.sheetRow, cfg.AUTO_SCAN_NOTE);
+    });
+  }
+
+  if (hasWork) {
     touchCheckerDataRevisionSafe_();
     scheduleCheckerCommandWorker_(cfg.SCHEDULE_DELAY_MS);
   }
 
   return {
-    ok: true,
-    queued: outcome.result.accepted.length,
-    duplicates: outcome.result.duplicates.length
+    ok: outcome.ok,
+    queued: outcome.ok ? outcome.result.accepted.length : 0,
+    duplicates: outcome.ok ? outcome.result.duplicates.length : 0,
+    workerScheduled: hasWork
   };
 }
 
