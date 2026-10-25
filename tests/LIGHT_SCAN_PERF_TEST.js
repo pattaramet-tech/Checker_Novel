@@ -776,6 +776,47 @@ expectEqual('ภาษาเกาหลี "한국" ถูกตรวจจั
 expectEqual('ภาษาไทย "คาทอรี" ไม่ถูกนับเป็นต่างประเทศ (ถูกต้อง)', countForeignMatches_('คาทอรี บัตสึอุนไซ'), 0);
 expectEqual('ภาษาอังกฤษไม่ถูกนับ (จับด้วยกฎยาวแยกต่างหาก)', countForeignMatches_('Patreon Ipenovel'), 0);
 
+console.log("\n=== Auto Trigger: เลือกแถวจาก C มีลิงก์ + G ยังไม่ติ๊ก ===\n");
+
+const CHECKER_CFG_TRIG = { START_ROW: 2 };
+
+function checkerTriggerPickAutoRows_(rows, cfg) {
+  const startRow = Number((typeof CHECKER_CFG !== 'undefined' && CHECKER_CFG && CHECKER_CFG.START_ROW) || 2);
+  const seenDocIds = {};
+  const out = [];
+
+  (rows || []).forEach(function(r) {
+    const sheetRow = Number(r && r.sheetRow || 0);
+    if (!sheetRow || sheetRow < startRow) return;
+
+    const title = String(r && r.title || '').trim();
+    if (!title) return;
+
+    const docId = String(r && r.docId || '').trim();
+    if (!docId) return;
+
+    if (r.checked) return;
+    if (seenDocIds[docId]) return;
+
+    seenDocIds[docId] = true;
+    out.push({ sheetRow: sheetRow, docId: docId, tabId: String(r && r.tabId || ''), enqueuedAt: Number(r && r.now || 0), attempts: 0 });
+  });
+
+  return out;
+}
+
+var autoRows = checkerTriggerPickAutoRows_([
+  { sheetRow: 3, title: 'เรื่อง A 001 - 050', docId: 'docAAA', checked: false },   // รับ
+  { sheetRow: 4, title: 'เรื่อง B 051 - 080', docId: 'docBBB', checked: true },    // G ติ๊กแล้ว = ข้าม
+  { sheetRow: 5, title: '', docId: 'docCCC', checked: false },                     // ไม่มีชื่อ = ข้าม
+  { sheetRow: 6, title: 'เรื่อง C', docId: '', checked: false },                   // ไม่มีลิงก์ = ข้าม
+  { sheetRow: 7, title: 'เรื่อง D 001 - 050', docId: 'docAAA', checked: false },   // DocID ซ้ำ = ข้าม
+  { sheetRow: 1, title: 'หัวตาราง', docId: 'docDDD', checked: false }              // แถวหัวตาราง = ข้าม
+], CHECKER_CFG_TRIG);
+
+expectEqual('เลือกได้เฉพาะแถวที่ผ่านเงื่อนไข 1 แถว', autoRows.length, 1);
+expectEqual('แถวที่เลือกคือแถว 3 เรื่อง A', autoRows.length && autoRows[0].sheetRow === 3 && autoRows[0].docId === 'docAAA', true);
+
 console.log("\n=========================");
 console.log('parity cases: ' + parityChecked + ' ตัวอย่าง x 4 การตรวจ');
 console.log(failed === 0 ? "✅ ผ่านทุกเคส" : "❌ ไม่ผ่าน " + failed + " เคส");

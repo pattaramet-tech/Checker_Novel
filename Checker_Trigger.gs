@@ -20,9 +20,16 @@
  * ========================= */
 
 const CHECKER_TRIGGER_CFG = {
-  // L: checkbox สั่งตรวจ (แทรกคอลัมน์ F กำหนดอ่านแล้วขยับจาก K เป็น L; M=13 หมายเหตุโปรแกรม)
-  COMMAND_COL: 12,
+  // P: checkbox สั่งตรวจด้วยมือ (สั่งซ้ำแถวที่ตรวจแล้วได้ — auto scan จะไม่แตะแถวที่ G เช็คแล้ว)
+  COMMAND_COL: 16,
   COMMAND_HEADER: 'สั่งตรวจ',
+
+  // ===== Auto Trigger: C มีลิงก์ Docs + G (Checked) ยังไม่ติ๊ก = เข้าคิวตรวจอัตโนมัติ =====
+  // sweep วิ่งเป็นรอบทุก AUTO_SWEEP_MINUTES (รับค่าได้ 1/5/10/15) + onEdit คอลัมน์ C เข้าคิวทันที
+  // เมื่อตรวจเสร็จ lightScan finalize จะติ๊ก G ให้เอง แถวจึงหลุดจาก auto scan ทันที
+  AUTO_SWEEP_FUNCTION: 'sweepCheckerAutoScan',
+  AUTO_SWEEP_MINUTES: 10,
+  AUTO_SCAN_NOTE: 'อยู่ในคิวตรวจ (อัตโนมัติ)',
 
   // true = ตรวจแบบเร็ว (lightScan): ไม่จัดฟอร์แมต เขียนผลแยก M/N/O ~76 วิ/แถว
   // false = ตรวจเต็มแบบเดิม: จัดฟอร์แมตครบ (Sarabun/ย่อหน้า/ลบบรรทัดว่าง ฯลฯ) เขียนโน้ตรวมที่ M
@@ -684,12 +691,54 @@ function onCheckerCommandEdit(e) {
   if (String(sheet.getName()) !== String(CHECKER_CFG.SHEET_NAME)) return;
 
   const values = e.range.getValues();
+
+  // ===== ช่องทาง 1: ติ๊ก checkbox คอลัมน์ P (สั่งตรวจด้วยมือ) =====
   const commandRows = checkerTriggerCollectCommandRows_(normalized, values, cfg)
     .filter(function(rowNumber) { return rowNumber >= CHECKER_CFG.START_ROW; });
 
-  if (!commandRows.length) return;
+  // ===== ช่องทาง 2 (Auto Trigger): แก้คอลัมน์ C = เข้าคิวอัตโนมัติถ้า G ยังไม่ติ๊ก =====
+  const urlCol = CHECKER_CFG.COL.episodeUrl;
+  const coversUrl = urlCol >= normalized.startCol && urlCol <= (normalized.startCol + normalized.numCols - 1);
+  const autoRows = [];
+
+  if (coversUrl) {
+    for (let i = 0; i < normalized.numRows; i++) {
+      const sheetRow = normalized.startRow + i;
+      if (sheetRow < CHECKER_CFG.START_ROW) continue;
+
+      let title = '';
+      let url = '';
+      let gVal = '';
+      try {
+        title = sheet.getRange(sheetRow, CHECKER_CFG.COL.title).getDisplayValue();
+        const edited = values[i] ? values[i][urlCol - normalized.startCol] : '';
+        url = String(edited == null ? '' : edited).trim();
+        if (!url) url = getRichTextUrlSafe_(sheet.getRange(sheetRow, urlCol)) ||
+          sheet.getRange(sheetRow, urlCol).getDisplayValue();
+        gVal = sheet.getRange(sheetRow, CHECKER_CFG.COL.checked).getDisplayValue();
+      } catch (eRead) {
+        continue;
+      }
+
+      // G ติ๊กแล้ว = ตรวจแล้ว ไม่เข้า auto; ลิงก์/ชื่อยังไม่ครบ = รอแก้ C อีกครั้งจะเข้าคิวเอง
+      if (checkerTriggerIsCommandOn_(gVal)) continue;
+      const validation = checkerTriggerValidateRow_(title, url, cfg);
+      if (!validation.ok) continue;
+
+      autoRows.push({
+        sheetRow: sheetRow,
+        docId: validation.docId,
+        tabId: validation.tabId,
+        enqueuedAt: Date.now(),
+        attempts: 0
+      });
+    }
+  }
+
+  if (!commandRows.length && !autoRows.length) return;
 
   const incoming = [];
+  const autoSheetRows = {};
   const now = Date.now();
 
   commandRows.forEach(function(sheetRow) {
@@ -723,6 +772,11 @@ function onCheckerCommandEdit(e) {
     });
   });
 
+  autoRows.forEach(function(item) {
+    autoSheetRows[item.sheetRow] = true;
+    incoming.push(item);
+  });
+
   if (!incoming.length) {
     touchCheckerDataRevisionSafe_();
     return;
@@ -744,7 +798,10 @@ function onCheckerCommandEdit(e) {
 
   const merged = outcome.result;
   merged.accepted.forEach(function(item) {
-    setCheckerCommandNote_(item.sheetRow, cfg.NOTE_QUEUED);
+    setCheckerCommandNote_(
+      item.sheetRow,
+      autoSheetRows[item.sheetRow] ? cfg.AUTO_SCAN_NOTE : cfg.NOTE_QUEUED
+    );
   });
   merged.rejected.forEach(function(item) {
     setCheckerCommandNote_(item.sheetRow, cfg.NOTE_QUEUE_FULL);
@@ -997,4 +1054,163 @@ function resetCheckerCommandQueue() {
 function resetCheckerCommandQueueWithAlert() {
   resetCheckerCommandQueue();
   SpreadsheetApp.getUi().alert('ล้างคิวสั่งตรวจแล้ว');
+}
+
+/* =========================
+ * Auto scan sweep (C มีลิงก์ Docs + G ยังไม่ติ๊ก = เข้าคิวอัตโนมัติ)
+ *
+ * วิ่งเป็นรอบตาม time-based trigger (AUTO_SWEEP_MINUTES) หน้าที่เดียวคือ
+ * กวาดหาแถวที่ตรงเงื่อนไขแล้วยัดเข้าคิวเดิม (คิว/lease/retry/resume ใช้ของเดิมทั้งหมด)
+ * เมื่อตรวจเสร็จ lightScan finalize ติ๊ก G ให้เอง แถวจึงหลุดจากการกวาดทันที
+ * ========================= */
+
+/**
+ * เลือกแถวที่รับเข้า auto scan จากรายการที่อ่านมาแล้ว (pure function เทสได้)
+ * - ข้ามแถวก่อน START_ROW / ไม่มีชื่อเรื่อง / ไม่มี DocID
+ * - ข้ามแถวที่ G ติ๊กแล้ว (ตรวจแล้ว)
+ * - DocID ซ้ำในรอบเดียวกัน เอาแถวแรกเท่านั้น (กันเลือกแถวผิดเอง)
+ */
+function checkerTriggerPickAutoRows_(rows, cfg) {
+  const startRow = Number((typeof CHECKER_CFG !== 'undefined' && CHECKER_CFG && CHECKER_CFG.START_ROW) || 2);
+  const seenDocIds = {};
+  const out = [];
+
+  (rows || []).forEach(function(r) {
+    const sheetRow = Number(r && r.sheetRow || 0);
+    if (!sheetRow || sheetRow < startRow) return;
+
+    const title = String(r && r.title || '').trim();
+    if (!title) return;
+
+    const docId = String(r && r.docId || '').trim();
+    if (!docId) return;
+
+    if (r.checked) return;
+    if (seenDocIds[docId]) return;
+
+    seenDocIds[docId] = true;
+    out.push({
+      sheetRow: sheetRow,
+      docId: docId,
+      tabId: String(r && r.tabId || ''),
+      enqueuedAt: Number(r && r.now || 0),
+      attempts: 0
+    });
+  });
+
+  return out;
+}
+
+/** กวาดชีต: อ่าน B/C/G รายแถว เลือกแถวที่ C มีลิงก์ Docs + G ยังไม่ติ๊ก แล้วยัดเข้าคิว */
+function sweepCheckerAutoScan() {
+  const cfg = CHECKER_TRIGGER_CFG;
+  const sheet = getCheckerSheet_();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CHECKER_CFG.START_ROW) return { ok: true, queued: 0 };
+
+  const numRows = lastRow - CHECKER_CFG.START_ROW + 1;
+  const display = sheet.getRange(CHECKER_CFG.START_ROW, 2, numRows, 6).getDisplayValues(); // B..G
+  const richC = sheet.getRange(CHECKER_CFG.START_ROW, 3, numRows, 1).getRichTextValues(); // C
+  const now = Date.now();
+  const candidates = [];
+
+  for (let i = 0; i < numRows; i++) {
+    const sheetRow = CHECKER_CFG.START_ROW + i;
+    const title = String(display[i][0] || '').trim();
+    const rt = richC[i][0];
+    const url = (rt && typeof rt.getLinkUrl === 'function')
+      ? (rt.getLinkUrl() || display[i][1])
+      : display[i][1];
+    const checked = checkerTriggerIsCommandOn_(display[i][5]); // G = idx 5 ของ B..G
+    if (checked) continue;
+    if (!title || !String(url || '').trim()) continue;
+
+    const validation = checkerTriggerValidateRow_(title, url, cfg);
+    if (!validation.ok) continue;
+
+    candidates.push({
+      sheetRow: sheetRow,
+      docId: validation.docId,
+      tabId: validation.tabId || '',
+      title: title,
+      checked: checked,
+      now: now
+    });
+  }
+
+  const picked = checkerTriggerPickAutoRows_(candidates, cfg);
+  if (!picked.length) return { ok: true, queued: 0 };
+
+  const outcome = withCheckerCommandState_(function(state) {
+    return checkerTriggerEnqueue_(state, picked, cfg);
+  });
+
+  if (!outcome.ok) return { ok: false, queued: 0, reason: 'LOCKED' };
+
+  outcome.result.accepted.forEach(function(item) {
+    setCheckerCommandNote_(item.sheetRow, cfg.AUTO_SCAN_NOTE);
+  });
+
+  if (outcome.result.accepted.length) {
+    touchCheckerDataRevisionSafe_();
+    scheduleCheckerCommandWorker_(cfg.SCHEDULE_DELAY_MS);
+  }
+
+  return {
+    ok: true,
+    queued: outcome.result.accepted.length,
+    duplicates: outcome.result.duplicates.length
+  };
+}
+
+/** ติดตั้ง time-based trigger ของ auto sweep แบบ idempotent */
+function installCheckerAutoScanSweep() {
+  const cfg = CHECKER_TRIGGER_CFG;
+  let removed = 0;
+
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === cfg.AUTO_SWEEP_FUNCTION) {
+      ScriptApp.deleteTrigger(trigger);
+      removed++;
+    }
+  });
+
+  const allowed = [1, 5, 10, 15];
+  const minutes = Number(cfg.AUTO_SWEEP_MINUTES || 10);
+  const step = allowed.indexOf(minutes) !== -1 ? minutes : 10;
+
+  ScriptApp.newTrigger(cfg.AUTO_SWEEP_FUNCTION)
+    .timeBased()
+    .everyMinutes(step)
+    .create();
+
+  return { ok: true, removed: removed, minutes: step };
+}
+
+function installCheckerAutoScanSweepWithAlert() {
+  const r = installCheckerAutoScanSweep();
+  const startInfo = sweepCheckerAutoScan();
+  SpreadsheetApp.getUi().alert(
+    'ติดตั้ง Auto Trigger แล้ว\n\n' +
+    'เงื่อนไข: คอลัมน์ C มีลิงก์ Google Docs และคอลัมน์ G (Checked) ยังไม่ติ๊ก\n' +
+    'กวาดหาทุก ' + r.minutes + ' นาที (+ แก้คอลัมน์ C เข้าคิวทันที)\n' +
+    'ตรวจแบบเร็ว ไม่จัดฟอร์แมต | ตรวจเสร็จระบบติ๊ก G ให้เอง แถวจึงหลุดจาก auto\n\n' +
+    'เข้าคิวจากการกวาดรอบแรก: ' + (startInfo.queued || 0) + ' แถว'
+  );
+}
+
+function removeCheckerAutoScanSweep() {
+  let removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === CHECKER_TRIGGER_CFG.AUTO_SWEEP_FUNCTION) {
+      ScriptApp.deleteTrigger(trigger);
+      removed++;
+    }
+  });
+  return { ok: true, removed: removed };
+}
+
+function removeCheckerAutoScanSweepWithAlert() {
+  const r = removeCheckerAutoScanSweep();
+  SpreadsheetApp.getUi().alert('ปิด Auto Trigger แล้ว (ลบทริกเกอร์กวาด ' + r.removed + ' รายการ)');
 }
