@@ -1365,6 +1365,14 @@ function addTabRunResultToBatchTotals_(batchTotals, result, tabName, tabIndex) {
   accumulateWebAppExtrasIntoBatchTotals_(batchTotals, result, tabName, tabIndex);
 }
 
+/** ตัดสินว่าควรหยุดก่อนเริ่มแท็บถัดไปไหม (กัน execution เกินเวลาขีดจำกัดของ Apps Script)
+ *  - งบ chunk หมด หรือ
+ *  - แท็บล่าสุดหนักจนแท็บถัดไปมีโอกาสล้นงบ (คาดการณ์ = lastTab x2 + เวลาที่ใช้ไป >= งบ) */
+function shouldBreakForTimeBudget_(chunkElapsedMs, lastTabElapsedMs, timeBudgetMs) {
+  if (chunkElapsedMs >= timeBudgetMs) return true;
+  return (chunkElapsedMs + Number(lastTabElapsedMs || 0) * 2) >= timeBudgetMs;
+}
+
 function scanWholeDocumentChunk(payload) {
   payload = payload || {};
   if (!payload.finalize && typeof resetForeignWordAllowListCache_ === 'function') resetForeignWordAllowListCache_();
@@ -1728,13 +1736,15 @@ function scanWholeDocumentChunk(payload) {
   var timeBudgetMs = Math.max(1000, Number(payload.timeBudgetMs || configuredTimeBudgetMs));
   var processedInThisCall = 0;
   var timeBudgetReached = false;
+  var lastTabElapsedMs = 0;
 
   for (var idxInChunk = 0; idxInChunk < slice.length; idxInChunk++) {
-    if (processedInThisCall > 0 && (Date.now() - chunkStartedAt) >= timeBudgetMs) {
+    if (processedInThisCall > 0 && shouldBreakForTimeBudget_(Date.now() - chunkStartedAt, lastTabElapsedMs, timeBudgetMs)) {
       timeBudgetReached = true;
       logChunkPerf_('TIME_BUDGET', {
         sheetRow: sheetRow,
-        nextTabIndex: cursor + processedInThisCall + 1
+        nextTabIndex: cursor + processedInThisCall + 1,
+        lastTabElapsedMs: lastTabElapsedMs
       });
       break;
     }
@@ -1871,6 +1881,7 @@ function scanWholeDocumentChunk(payload) {
       });
     }
 
+    lastTabElapsedMs = Date.now() - tabStartedAt;
     processedInThisCall++;
   }
 
@@ -3343,7 +3354,7 @@ function buildLightScanColumnNotes_(summary, doc) {
  *   และ Text.replaceText สำหรับ — / و / เลขไทย (ข้อความใหม่รับฟอร์แมตของข้อความเดิม)
  * ========================================================= */
 
-const LIGHT_SCAN_VERSION_ = 'perf-11';
+const LIGHT_SCAN_VERSION_ = 'perf-12';
 
 var __LIGHT_SCAN_PERF__ = null;
 

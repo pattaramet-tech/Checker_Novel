@@ -900,3 +900,20 @@ expectEqual('แผงสถานะ indent=0', panelPara._fi, 0);
 expectEqual('แผงสถานะ spacingAfter=0', panelPara._sa, 0);
 
 console.log("\n=========================");
+
+// ===== shouldBreakForTimeBudget_ (กัน execution เกินเวลาขีดจำกัด) =====
+function shouldBreakForTimeBudget_(chunkElapsedMs, lastTabElapsedMs, timeBudgetMs) {
+  if (chunkElapsedMs >= timeBudgetMs) return true;
+  return (chunkElapsedMs + Number(lastTabElapsedMs || 0) * 2) >= timeBudgetMs;
+}
+
+console.log("\n=== shouldBreakForTimeBudget_ (งบเวลาแบบคาดการณ์แท็บหนัก) ===\n");
+
+expectEqual('งบหมด 250/240 => หยุด', shouldBreakForTimeBudget_(250, 5000, 240000), true);
+expectEqual('ยังไม่ถึงงบ แท็บเบา 5 วิ => ทำต่อ', shouldBreakForTimeBudget_(150000, 5000, 240000), false);
+expectEqual('แท็บล่าสุดหนัก 186 วิ เวลารวม 186 => หยุดก่อนเริ่มแท็บหนักถัดไป', shouldBreakForTimeBudget_(186000, 186000, 240000), true);
+expectEqual('แท็บล่าสุด 90 วิ เวลารวม 100 => หยุดก่อนเสี่ยง', shouldBreakForTimeBudget_(100000, 90000, 240000), true);
+expectEqual('เวลารวมน้อย + แท็บเบา => ทำต่อ', shouldBreakForTimeBudget_(20000, 3000, 240000), false);
+
+console.log('
+=========================');

@@ -933,7 +933,7 @@ function runCheckerCommandQueue() {
     const job = claim.result && claim.result.job;
     if (!job) break;
 
-    const step = runCheckerCommandChunk_(job, cfg);
+    const step = runCheckerCommandChunk_(job, cfg, startedAt);
     processedChunks++;
 
     if (step.ok) {
@@ -991,11 +991,22 @@ function runCheckerCommandQueue() {
  * เดินงานหนึ่ง chunk ด้วย primitive เดิมของ Checker_Batch
  * ไม่ใช้ scanRowDocumentFull เพราะฟังก์ชันนั้นวน chunk จนจบภายใน execution เดียว
  */
-function runCheckerCommandChunk_(job, cfg) {
+function runCheckerCommandChunk_(job, cfg, workerStartedAt) {
   cfg = cfg || CHECKER_TRIGGER_CFG;
 
   const payload = checkerTriggerBuildChunkPayload_(job, cfg);
   if (!payload || !payload.sheetRow) return { ok: false, reason: 'INVALID_JOB' };
+
+  // งบเวลาของ chunk ปรับตามเวลาที่เหลือจริงของ execution (เพดาน Apps Script 6 นาที)
+  // กัน error เกินเวลาขีดจำกัด เมื่อ execution ทำงานมานานแล้วเจอแท็บหนัก
+  const elapsedMs = Date.now() - Number(workerStartedAt || Date.now());
+  const remainingMs = Number(cfg.MAX_EXEC_MS || 330000) - elapsedMs - 45000;
+  if (remainingMs >= 60000) {
+    payload.timeBudgetMs = Math.min(
+      Number(payload.timeBudgetMs || 240000),
+      remainingMs
+    );
+  }
 
   try {
     if (payload.finalize !== true) {
