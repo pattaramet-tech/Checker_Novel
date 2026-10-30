@@ -909,7 +909,7 @@ function shouldBreakForTimeBudget_(chunkElapsedMs, lastTabElapsedMs, timeBudgetM
 
 console.log("\n=== shouldBreakForTimeBudget_ (งบเวลาแบบคาดการณ์แท็บหนัก) ===\n");
 
-expectEqual('งบหมด 250/240 => หยุด', shouldBreakForTimeBudget_(250, 5000, 240000), true);
+expectEqual('งบหมด 250 วิ => หยุด', shouldBreakForTimeBudget_(250000, 5000, 240000), true);
 expectEqual('ยังไม่ถึงงบ แท็บเบา 5 วิ => ทำต่อ', shouldBreakForTimeBudget_(150000, 5000, 240000), false);
 expectEqual('แท็บล่าสุดหนัก 186 วิ เวลารวม 186 => หยุดก่อนเริ่มแท็บหนักถัดไป', shouldBreakForTimeBudget_(186000, 186000, 240000), true);
 expectEqual('แท็บล่าสุด 90 วิ เวลารวม 100 => หยุดก่อนเสี่ยง', shouldBreakForTimeBudget_(100000, 90000, 240000), true);
