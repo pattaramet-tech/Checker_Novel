@@ -1698,6 +1698,11 @@ function scanWholeDocumentChunk(payload) {
     }
 
     var singleMerged = mergeBatchTotals_(accumulated, batchTotals);
+    var singlePerf = lightScan ? lightScanPerfSnapshot_() : null;
+    if (singlePerf) {
+      singlePerf.executionMs = Date.now() - execStartedAt;
+      try { console.log('[LightScanPerf][chunk] ' + JSON.stringify(singlePerf)); } catch (eLog) {}
+    }
 
     return {
       ok: true,
@@ -1708,7 +1713,7 @@ function scanWholeDocumentChunk(payload) {
       nextCursor: 1,
       summary: sanitizeCheckerPublicSummary_(singleMerged),
       checkpoint: sanitizeCheckerCheckpointSummary_(singleMerged),
-      perf: lightScan ? lightScanPerfSnapshot_() : null
+      perf: singlePerf
     };
   }
 
@@ -1872,6 +1877,11 @@ function scanWholeDocumentChunk(payload) {
   var merged = mergeBatchTotals_(accumulated, batchTotals);
   var nextCursor = cursor + processedInThisCall;
   var done = !timeBudgetReached && nextCursor >= tabs.length;
+  var chunkPerf = lightScan ? lightScanPerfSnapshot_() : null;
+  if (chunkPerf) {
+    chunkPerf.executionMs = Date.now() - execStartedAt;
+    try { console.log('[LightScanPerf][chunk] ' + JSON.stringify(chunkPerf)); } catch (eLog) {}
+  }
 
   return {
     ok: true,
@@ -1883,7 +1893,7 @@ function scanWholeDocumentChunk(payload) {
     summary: sanitizeCheckerPublicSummary_(merged),
     checkpoint: sanitizeCheckerCheckpointSummary_(merged),
     timeBudgetReached: timeBudgetReached,
-    perf: lightScan ? lightScanPerfSnapshot_() : null
+    perf: chunkPerf
   };
 }
 
@@ -2898,6 +2908,50 @@ function detectEnglishSourceReportOnly_() {
 }
 
 /**
+ * เว้นวรรค + ระยะห่างจาก snapshot ที่อ่านไว้แล้ว (ไม่ไล่อ่านเอกสารซ้ำ)
+ * กฎเดียวกับ formatParagraphLayout_: ย่อหน้าแรก 36 / spacing 10 / แผงสถานะ ไม่ย่อหน้า
+ * เขียนเฉพาะเมื่อค่าปัจจุบันต่างจากเป้า (idempotent)
+ */
+function formatLayoutFromSnapshot_(paras, paraTexts) {
+  var indent = 36;
+  var after = 10;
+  var indentCount = 0;
+  var spacingCount = 0;
+
+  for (var i = 0; i < paras.length; i++) {
+    var tx = String(paraTexts[i] || '').trim();
+    if (!tx) continue;
+    var p = paras[i];
+    var statusLine = (typeof isStatusPanelLine_ === 'function') ? isStatusPanelLine_(tx) : false;
+    var targetIndent = statusLine ? 0 : indent;
+    var targetAfter = statusLine ? 0 : after;
+
+    try {
+      if (typeof p.getIndentFirstLine === 'function') {
+        if (p.getIndentFirstLine() !== targetIndent) p.setIndentFirstLine(targetIndent);
+      } else {
+        p.setIndentFirstLine(targetIndent);
+      }
+      if (typeof p.getIndentStart === 'function') {
+        if (p.getIndentStart() !== 0) p.setIndentStart(0);
+      }
+
+      if (typeof p.getSpacingBefore === 'function') {
+        if (p.getSpacingBefore() !== 0) p.setSpacingBefore(0);
+      }
+      if (typeof p.getSpacingAfter === 'function') {
+        if (p.getSpacingAfter() !== targetAfter) p.setSpacingAfter(targetAfter);
+      }
+    } catch (e) {}
+
+    indentCount++;
+    spacingCount++;
+  }
+
+  return { indentCount: indentCount, spacingCount: spacingCount };
+}
+
+/**
  * โหมดตรวจเบาต่อแท็บ (single-pass snapshot, ปัจจุบัน perf-10)
  * อ่านข้อความย่อหน้าครั้งเดียว แล้ว cleanup + ตัวตรวจทุกกลุ่มใช้ข้อความชุดเดียวกัน
  * - cleanup: — → ..., و → ล, เลขไทย → อารบิก, ลบ : หลังเลขบท, ตอนที่ → บทที่ (รักษาฟอร์แมต)
@@ -2921,17 +2975,11 @@ function runAllChecksLightScan_() {
   if (typeof resetForeignWordAllowListCache_ === 'function') resetForeignWordAllowListCache_();
 
   // ===== จัดฟอร์แมตเฉพาะ เว้นวรรค + ระยะห่างบรรทัด (ตามที่ผู้ใช้ขอ) =====
+  // ใช้ snapshot ที่อ่านไว้แล้ว — ไม่ไล่อ่านเอกสารซ้ำ
   // กฎเดียวกับตรวจเต็ม: ย่อหน้าแรก 36 / spacing หลังย่อหน้า 10 / แผงสถานะ 【...】 ไม่ย่อหน้า
   // ไม่แตะฟอนต์/ขนาด/สี/เส้นใต้ และไม่ลบบรรทัดว่าง
   var layout = lightScanPerfTimed_('formatLayout', function() {
-    return (typeof formatParagraphLayout_ === 'function')
-      ? formatParagraphLayout_(body, {
-          applyIndent: true,
-          applySpacing: true,
-          indent: 36,
-          spacingAfter: 10
-        })
-      : { indentCount: 0, spacingCount: 0 };
+    return formatLayoutFromSnapshot_(paras, paraTexts);
   });
   lightScanPerfCount_('layoutParagraphs', Number(layout.indentCount || 0));
 
@@ -3295,7 +3343,7 @@ function buildLightScanColumnNotes_(summary, doc) {
  *   และ Text.replaceText สำหรับ — / و / เลขไทย (ข้อความใหม่รับฟอร์แมตของข้อความเดิม)
  * ========================================================= */
 
-const LIGHT_SCAN_VERSION_ = 'perf-10';
+const LIGHT_SCAN_VERSION_ = 'perf-11';
 
 var __LIGHT_SCAN_PERF__ = null;
 

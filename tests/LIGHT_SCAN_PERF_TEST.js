@@ -825,3 +825,78 @@ console.log("\n=========================");
 console.log('parity cases: ' + parityChecked + ' ตัวอย่าง x 4 การตรวจ');
 console.log(failed === 0 ? "✅ ผ่านทุกเคส" : "❌ ไม่ผ่าน " + failed + " เคส");
 process.exitCode = failed === 0 ? 0 : 1;
+
+// ===== เว้นวรรค/ระยะห่างจาก snapshot (port จาก formatLayoutFromSnapshot_) =====
+function formatLayoutFromSnapshot_(paras, paraTexts) {
+  var indent = 36;
+  var after = 10;
+  var indentCount = 0;
+  var spacingCount = 0;
+
+  for (var i = 0; i < paras.length; i++) {
+    var tx = String(paraTexts[i] || '').trim();
+    if (!tx) continue;
+    var p = paras[i];
+    var statusLine = (typeof isStatusPanelLine_ === 'function') ? isStatusPanelLine_(tx) : false;
+    var targetIndent = statusLine ? 0 : indent;
+    var targetAfter = statusLine ? 0 : after;
+    var wroteIndent = false;
+    var wroteSpacing = false;
+
+    if (typeof p.getIndentFirstLine === 'function') {
+      if (p.getIndentFirstLine() !== targetIndent) { p.setIndentFirstLine(targetIndent); wroteIndent = true; }
+    }
+    if (typeof p.getIndentStart === 'function') {
+      if (p.getIndentStart() !== 0) { p.setIndentStart(0); wroteIndent = true; }
+    }
+    if (typeof p.getSpacingBefore === 'function') {
+      if (p.getSpacingBefore() !== 0) { p.setSpacingBefore(0); wroteSpacing = true; }
+    }
+    if (typeof p.getSpacingAfter === 'function') {
+      if (p.getSpacingAfter() !== targetAfter) { p.setSpacingAfter(targetAfter); wroteSpacing = true; }
+    }
+
+    indentCount++;
+    spacingCount++;
+  }
+
+  return { indentCount: indentCount, spacingCount: spacingCount, writes: { indent: wroteIndent } };
+}
+
+function makeFakePara_(firstIndent, indentStart, spacingBefore, spacingAfter) {
+  return {
+    _ops: [],
+    getIndentFirstLine: function() { return this._fi; },
+    getIndentStart: function() { return this._is; },
+    getSpacingBefore: function() { return this._sb; },
+    getSpacingAfter: function() { return this._sa; },
+    setIndentFirstLine: function(v) { this._fi = v; this._ops.push('fi=' + v); },
+    setIndentStart: function(v) { this._is = v; this._ops.push('is=' + v); },
+    setSpacingBefore: function(v) { this._sb = v; this._ops.push('sb=' + v); },
+    setSpacingAfter: function(v) { this._sa = v; this._ops.push('sa=' + v); },
+    _fi: firstIndent, _is: indentStart, _sb: spacingBefore, _sa: spacingAfter
+  };
+}
+
+console.log("\n=== formatLayoutFromSnapshot_ (เว้นวรรค/ระยะห่าง จาก snapshot) ===\n");
+
+var layoutParas = [
+  makeFakePara_(36, 0, 0, 10),      // ถูกต้องแล้ว = ไม่เขียน
+  makeFakePara_(0, 0, 0, 0),        // ต้องแก้ทั้งสอง
+  makeFakePara_(0, 12, 5, 20)       // ต้องแก้ indentStart/spacing
+];
+var layoutTexts = ['ย่อหน้าแรกมีเนื้อหา', 'ย่อหน้าสองมีเนื้อหา', 'ย่อหน้าสามมีเนื้อหา'];
+var layoutRes = formatLayoutFromSnapshot_(layoutParas, layoutTexts);
+expectEqual('นับย่อหน้าที่จัดครบ 3', layoutRes.indentCount, 3);
+expectEqual('นับระยะห่างครบ 3', layoutRes.spacingCount, 3);
+expectEqual('ย่อหน้าที่ถูกต้องแล้วไม่ถูกเขียนซ้ำ (รักษาค่าเดิม)', layoutParas[0]._ops.length, 0);
+expectEqual('ย่อหน้าที่สาม ย่อหน้าแรก=36', layoutParas[2]._fi, 36);
+expectEqual('ย่อหน้าที่สาม spacingAfter=10', layoutParas[2]._sa, 10);
+
+// แผงสถานะ 【...】 ต้องไม่ย่อหน้า/ไม่ระยะ
+var panelPara = makeFakePara_(36, 0, 5, 10);
+formatLayoutFromSnapshot_([panelPara], ['【รอ 5 แท็บ】']);
+expectEqual('แผงสถานะ indent=0', panelPara._fi, 0);
+expectEqual('แผงสถานะ spacingAfter=0', panelPara._sa, 0);
+
+console.log("\n=========================");
