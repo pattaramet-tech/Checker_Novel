@@ -2898,15 +2898,16 @@ function detectEnglishSourceReportOnly_() {
 }
 
 /**
- * โหมดตรวจเบาต่อแท็บ (single-pass snapshot, ปัจจุบัน perf-6)
+ * โหมดตรวจเบาต่อแท็บ (single-pass snapshot, ปัจจุบัน perf-10)
  * อ่านข้อความย่อหน้าครั้งเดียว แล้ว cleanup + ตัวตรวจทุกกลุ่มใช้ข้อความชุดเดียวกัน
  * - cleanup: — → ..., و → ล, เลขไทย → อารบิก, ลบ : หลังเลขบท, ตอนที่ → บทที่ (รักษาฟอร์แมต)
+ * - จัดฟอร์แมตเฉพาะ เว้นวรรค + ระยะห่างบรรทัด (ไม่แตะฟอนต์/ขนาด ตามที่ผู้ใช้ขอ)
  * - เลขบทนับเฉพาะหัวบทแรกของแท็บ บรรทัดกลางเนื้อเรื่องไม่นับ (ไม่ขึ้นเลขบทไม่ต่อเนื่องหลอก)
  * - ไฮไลต์คำต่างประเทศด้วย highlightForeignCharacters() (ทำเป็นขั้นสุดท้าย)
  * - ไฮไลต์บรรทัดขยะท้ายบทสีเหลืองอำพัน #FFD966 (ทำหลังไฮไลต์คำต่างประเทศ)
  * - หลังแก้ จะ re-read เฉพาะย่อหน้า dirty เพื่อให้ตัวตรวจเห็นข้อความล่าสุด
  * - ขั้นตอนที่ข้าม: ลบอักษรละตินพิเศษ, จัดหัวบท/แปลงหัวบท, ลบวงเล็บ/ชื่อซ้ำ/หัวบทซ้ำ,
- *   แยกบรรทัด, ย่อหน้า/ระยะห่าง, ลบบรรทัดว่าง, ฟอนต์ Sarabun
+ *   แยกบรรทัด, ลบบรรทัดว่าง, ฟอนต์/ขนาดตัวอักษร
  */
 function runAllChecksLightScan_() {
   var body = getActiveBody_();
@@ -2918,6 +2919,21 @@ function runAllChecksLightScan_() {
   });
 
   if (typeof resetForeignWordAllowListCache_ === 'function') resetForeignWordAllowListCache_();
+
+  // ===== จัดฟอร์แมตเฉพาะ เว้นวรรค + ระยะห่างบรรทัด (ตามที่ผู้ใช้ขอ) =====
+  // กฎเดียวกับตรวจเต็ม: ย่อหน้าแรก 36 / spacing หลังย่อหน้า 10 / แผงสถานะ 【...】 ไม่ย่อหน้า
+  // ไม่แตะฟอนต์/ขนาด/สี/เส้นใต้ และไม่ลบบรรทัดว่าง
+  var layout = lightScanPerfTimed_('formatLayout', function() {
+    return (typeof formatParagraphLayout_ === 'function')
+      ? formatParagraphLayout_(body, {
+          applyIndent: true,
+          applySpacing: true,
+          indent: 36,
+          spacingAfter: 10
+        })
+      : { indentCount: 0, spacingCount: 0 };
+  });
+  lightScanPerfCount_('layoutParagraphs', Number(layout.indentCount || 0));
 
   // ===== cleanup เนื้อหาเบา (แก้เฉพาะย่อหน้าที่มีจุดแก้ รักษาฟอร์แมตส่วนอื่น) =====
   var cleanup = applyLightScanCleanups_(paras, paraTexts);
@@ -2998,6 +3014,8 @@ function runAllChecksLightScan_() {
     titleColonFixed: cleanup.counts.colon,
     thaiDigitFixed: cleanup.counts.thaiDigit,
     episodePrefixFixed: cleanup.counts.tonToBod,
+    paragraphCount: Number(layout.indentCount || 0),
+    spacingCount: Number(layout.spacingCount || 0),
     junkLinesHighlighted: junkHighlighted,
     sourceNoChapterNote: sourceNoChapterNote,
     englishSourceCleanup: englishSourceCleanup,
@@ -3047,6 +3065,8 @@ function accumulateLightScanTabExtras_(batchTotals, result, tabIndex) {
   batchTotals.titleColonFixed = Number(batchTotals.titleColonFixed || 0) + Number(result.titleColonFixed || 0);
   batchTotals.thaiDigitFixed = Number(batchTotals.thaiDigitFixed || 0) + Number(result.thaiDigitFixed || 0);
   batchTotals.episodePrefixFixed = Number(batchTotals.episodePrefixFixed || 0) + Number(result.episodePrefixFixed || 0);
+  batchTotals.paragraphCount += Number(result.paragraphCount || 0);
+  batchTotals.spacingCount += Number(result.spacingCount || 0);
 }
 
 /**
@@ -3232,6 +3252,9 @@ function buildLightScanColumnNotes_(summary, doc) {
   if (Number(summary.episodePrefixFixed || 0) > 0) {
     fixStats.push('แก้ ตอนที่ เป็น บทที่ ' + Number(summary.episodePrefixFixed) + ' จุด');
   }
+  if (Number(summary.paragraphCount || 0) > 0 || Number(summary.spacingCount || 0) > 0) {
+    fixStats.push('จัดเว้นวรรค ' + Number(summary.paragraphCount || 0) + ' | ระยะห่าง ' + Number(summary.spacingCount || 0) + ' ย่อหน้า');
+  }
   if (Number(summary.thaiDigitFixed || 0) > 0) {
     fixStats.push('แปลงเลขไทยเป็นอารบิก ' + Number(summary.thaiDigitFixed) + ' ตัว');
   }
@@ -3272,7 +3295,7 @@ function buildLightScanColumnNotes_(summary, doc) {
  *   และ Text.replaceText สำหรับ — / و / เลขไทย (ข้อความใหม่รับฟอร์แมตของข้อความเดิม)
  * ========================================================= */
 
-const LIGHT_SCAN_VERSION_ = 'perf-9';
+const LIGHT_SCAN_VERSION_ = 'perf-10';
 
 var __LIGHT_SCAN_PERF__ = null;
 

@@ -423,6 +423,10 @@ function buildLightScanColumnNotes_(summary, doc) {
   if (Number(summary.replacedEmDashCount || 0) > 0) fixStats.push('แทน — เป็น ... ' + Number(summary.replacedEmDashCount) + ' จุด');
   if (Number(summary.titleColonFixed || 0) > 0) fixStats.push('ลบ : ในชื่อบท ' + Number(summary.titleColonFixed) + ' จุด');
   if (Number(summary.thaiDigitFixed || 0) > 0) fixStats.push('แปลงเลขไทยเป็นอารบิก ' + Number(summary.thaiDigitFixed) + ' ตัว');
+  if (Number(summary.episodePrefixFixed || 0) > 0) fixStats.push('แก้ ตอนที่ เป็น บทที่ ' + Number(summary.episodePrefixFixed) + ' จุด');
+  if (Number(summary.paragraphCount || 0) > 0 || Number(summary.spacingCount || 0) > 0) {
+    fixStats.push('จัดเว้นวรรค ' + Number(summary.paragraphCount || 0) + ' | ระยะห่าง ' + Number(summary.spacingCount || 0) + ' ย่อหน้า');
+  }
   if (fixStats.length) other.push('แก้แล้ว: ' + fixStats.join(' | '));
 
   if (summary.untranslatedFallbackRan) {
