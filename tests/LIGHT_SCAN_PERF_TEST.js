@@ -915,5 +915,4 @@ expectEqual('แท็บล่าสุดหนัก 186 วิ เวลา�
 expectEqual('แท็บล่าสุด 90 วิ เวลารวม 100 => หยุดก่อนเสี่ยง', shouldBreakForTimeBudget_(100000, 90000, 240000), true);
 expectEqual('เวลารวมน้อย + แท็บเบา => ทำต่อ', shouldBreakForTimeBudget_(20000, 3000, 240000), false);
 
-console.log('
-=========================');
+console.log("\n=========================");
